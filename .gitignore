@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+*.log
+
+# Data / recordings
+*.pcap
+*.pcapng
+*.mp4
+*.avi
+*.jpg
+*.png
+*.heif
+dataset/
+captures/
+recordings/
+logs/
+
+# OS junk
+.DS_Store
+Thumbs.db
