@@ -1,0 +1,513 @@
+{
+
+  "packet0": {
+    "fields": [
+      { "name": "NID_PACKET",     "bits": 8 },   
+      { "name": "L_PACKET",       "bits": 13 },  
+      { "name": "Q_SCALE",        "bits": 2 },
+      { "name": "NID_LRBG",       "bits": 24 },
+      { "name": "D_LRBG",         "bits": 15 },
+      { "name": "Q_DIRLRBG",      "bits": 2 },
+      { "name": "Q_DLRBG",        "bits": 2 },
+      { "name": "L_DOUBTOVER",    "bits": 15 },
+      { "name": "L_DOUBTUNDER",   "bits": 15 },
+      { "name": "Q_INTEGRITY",    "bits": 2 },
+      { "name": "L_TRAININT",     "bits": 15 },
+      { "name": "V_TRAIN",        "bits": 7 },
+      { "name": "Q_DIRTRAIN",     "bits": 2 },
+      { "name": "M_MODE",         "bits": 5 },
+      { "name": "M_LEVEL",        "bits": 3 },
+      { "name": "NID_NTC",        "bits": 8 }
+    ],
+    "values": {
+      "NID_PACKET": 0,
+      "L_PACKET": 101
+    }
+  },
+
+
+  "packet1": {
+    "fields": [
+      { "name": "NID_PACKET",     "bits": 8 },
+      { "name": "L_PACKET",       "bits": 13 },
+      { "name": "Q_SCALE",        "bits": 2 },
+      { "name": "NID_LRBG",       "bits": 24 },
+      { "name": "NID_PRVLRBG",    "bits": 24 },
+      { "name": "D_LRBG",         "bits": 15 },
+      { "name": "Q_DIRLRBG",      "bits": 2 },
+      { "name": "Q_DLRBG",        "bits": 2 },
+      { "name": "L_DOUBTOVER",    "bits": 15 },
+      { "name": "L_DOUBTUNDER",   "bits": 15 },
+      { "name": "Q_INTEGRITY",    "bits": 2 },
+      { "name": "L_TRAININT",     "bits": 15 },
+      { "name": "V_TRAIN",        "bits": 7 },
+      { "name": "Q_DIRTRAIN",     "bits": 2 },
+      { "name": "M_MODE",         "bits": 5 },
+      { "name": "M_LEVEL",        "bits": 3 },
+      { "name": "NID_NTC",        "bits": 8 }
+    ],
+    "values": {
+      "NID_PACKET": 1,
+      "L_PACKET": 124
+    }
+  },
+
+
+  "packet2": {
+    "fields": [
+      { "name": "NID_PACKET",     "bits": 8 },
+      { "name": "Q_DIR",          "bits": 2 },
+      { "name": "L_PACKET",       "bits": 13 },
+      { "name": "M_VERSION",      "bits": 7 }
+    ],
+    "values": {
+      "NID_PACKET": 2,
+      "Q_DIR": 1,
+      "L_PACKET": 30,
+      "M_VERSION": 35
+    }
+  },
+
+
+  "packet5": {
+    "fields": [
+      { "name": "NID_PACKET",        "bits": 8 },
+      { "name": "L_PACKET",          "bits": 13 },
+      { "name": "NID_OPERATIONAL",   "bits": 32 }
+    ],
+    "values": {
+      "NID_PACKET": 5,
+      "L_PACKET": 53
+    }
+  },
+
+
+  "packet11": {
+    "fields": [
+      { "name": "NID_PACKET",        "bits": 8 },
+      { "name": "L_PACKET",          "bits": 13 },
+      { "name": "NC_CDTRAIN",        "bits": 4 },
+      { "name": "NC_TRAIN",          "bits": 15 },
+      { "name": "L_TRAIN",           "bits": 12 },
+      { "name": "V_MAXTRAIN",        "bits": 7 },
+      { "name": "M_LOADINGGAUGE",    "bits": 8 },
+      { "name": "M_AXLELOADCAT",     "bits": 7 },
+      { "name": "M_AIRTIGHT",        "bits": 2 },
+      { "name": "N_AXLE",            "bits": 10 },
+      { "name": "N_ITER_voltage",    "bits": 5 },
+      { "name": "M_VOLTAGE_k",       "bits": 4 },
+      { "name": "NID_CTRACTION_k",   "bits": 10 },
+      { "name": "N_ITER_ntc",        "bits": 5 },
+      { "name": "NID_NTC_k",         "bits": 8 }
+    ],
+    "values": {
+      "NID_PACKET": 11,
+      "L_PACKET": 99
+    }
+  },
+
+  "packet15": {
+  "fields": [
+    { "name": "NID_PACKET",       "bits": 8 },
+    { "name": "Q_DIR",            "bits": 2 },
+    { "name": "L_PACKET",         "bits": 13 },
+    { "name": "Q_SCALE",          "bits": 2 },
+    { "name": "V_EMA",            "bits": 7 },
+    { "name": "T_EMA",            "bits": 10 },
+    { "name": "N_ITER",           "bits": 5 },
+
+    { "name": "L_SECTION_k",           "bits": 15, "repeat": "N_ITER" },
+    { "name": "Q_SECTIONTIMER_k",      "bits": 1,  "repeat": "N_ITER" },
+    { "name": "T_SECTIONTIMER_k",      "bits": 10, "repeat": "N_ITER" },
+    { "name": "D_SECTIONTIMERSTOPLOC_k", "bits": 15, "repeat": "N_ITER" },
+
+    { "name": "L_ENDSECTION",      "bits": 15 },
+    { "name": "Q_SECTIONTIMER",    "bits": 1 },
+    { "name": "T_SECTIONTIMER",    "bits": 10 },
+    { "name": "D_SECTIONTIMERSTOPLOC", "bits": 15 },
+
+    { "name": "Q_ENDTIMER",        "bits": 1 },
+    { "name": "T_ENDTIMER",        "bits": 10 },
+    { "name": "D_ENDTIMERSTARTLOC", "bits": 15 },
+
+    { "name": "Q_DANGERPOINT",     "bits": 1 },
+    { "name": "D_DP",              "bits": 15 },
+    { "name": "V_RELEASEDP",       "bits": 7 },
+    
+    { "name": "Q_OVERLAP",         "bits": 1 },
+    { "name": "D_STARTOL",         "bits": 15 },
+    { "name": "T_OL",              "bits": 10 },
+    { "name": "D_OL",              "bits": 15 },
+    { "name": "V_RELEASEOL",       "bits": 7 }
+  ],
+  "values": {
+    "NID_PACKET": 15,
+    "L_PACKET": 0,
+    "Q_SCALE": 1,
+    "Q_DANGERPOINT": 0,
+    "Q_OVERLAP": 0,
+    "Q_SECTIONTIMER": 0,
+    "Q_ENDTIMER": 0
+  }
+},
+"message3": {
+  "fields": [
+    { "name": "NID_MESSAGE",  "bits": 8 },
+    { "name": "L_MESSAGE",    "bits": 10 },
+    { "name": "T_TRAIN",      "bits": 32 },
+    { "name": "M_ACK",        "bits": 1 },
+    { "name": "NID_LRBG",     "bits": 24 }
+  ],
+  "values": {
+    "NID_MESSAGE": 3,
+    "L_MESSAGE": 99,
+    "T_TRAIN": 0,
+    "M_ACK": 1,
+    "NID_LRBG": 16777214
+  },
+  "subPackets": ["packet15"]
+}
+,
+
+  "message8": {
+    "fields": [
+      { "name": "NID_MESSAGE",   "bits": 8 },
+      { "name": "L_MESSAGE",     "bits": 10 },
+      { "name": "T_TRAIN",       "bits": 32 },
+      { "name": "M_ACK",         "bits": 1 },
+      { "name": "NID_LRBG",      "bits": 24 },
+      { "name": "T_TRAIN_ref",   "bits": 32 }
+    ],
+    "values": {
+      "NID_MESSAGE": 8,
+      "L_MESSAGE": 107,
+      "T_TRAIN": 0,
+      "M_ACK": 1,
+      "NID_LRBG": 16777214,
+      "T_TRAIN_ref": 0
+    }
+  },
+
+  "message9": {
+    "fields": [
+      { "name": "NID_MESSAGE",  "bits": 8 },
+      { "name": "L_MESSAGE",    "bits": 10 },
+      { "name": "T_TRAIN",      "bits": 32 },
+      { "name": "M_ACK",        "bits": 1 },
+      { "name": "NID_LRBG",     "bits": 24 }
+    ],
+    "values": {
+      "NID_MESSAGE": 9,
+      "L_MESSAGE": 99,
+      "T_TRAIN": 0,
+      "M_ACK": 1,
+      "NID_LRBG": 16777214
+    }
+  },
+
+  "message32": {
+    "fields": [
+      { "name": "NID_MESSAGE",  "bits": 8 },
+      { "name": "L_MESSAGE",    "bits": 10 },
+      { "name": "T_TRAIN",      "bits": 32 },
+      { "name": "M_ACK",        "bits": 1 },
+      { "name": "NID_LRBG",     "bits": 24 },
+      { "name": "M_VERSION",    "bits": 7 }
+    ],
+    "values": {
+      "NID_MESSAGE": 32,
+      "L_MESSAGE": 99,
+      "T_TRAIN": 0,
+      "M_ACK": 1,
+      "NID_LRBG": 16777214,
+      "M_VERSION": 35
+    }
+  },
+
+  "message33": {
+    "fields": [
+      { "name": "NID_MESSAGE",  "bits": 8 },
+      { "name": "L_MESSAGE",    "bits": 10 },
+      { "name": "T_TRAIN",      "bits": 32 },
+      { "name": "M_ACK",        "bits": 1 },
+      { "name": "NID_LRBG",     "bits": 24 },
+      { "name": "Q_SCALE",      "bits": 2 },
+      { "name": "D_REF",        "bits": 15 }
+    ],
+    "values": {
+      "NID_MESSAGE": 33,
+      "L_MESSAGE": 112,
+      "T_TRAIN": 0,
+      "M_ACK": 1,
+      "NID_LRBG": 16777214,
+      "Q_SCALE": 1,
+      "D_REF": 100
+    }
+  },
+
+  "message38": {
+    "fields": [
+      { "name": "NID_MESSAGE",  "bits": 8 },
+      { "name": "L_MESSAGE",    "bits": 10 },
+      { "name": "T_TRAIN",      "bits": 32 },
+      { "name": "M_ACK",        "bits": 1 }
+    ],
+    "values": {
+      "NID_MESSAGE": 38,
+      "L_MESSAGE": 51,
+      "T_TRAIN": 0,
+      "M_ACK": 1
+    }
+  },
+
+  "message39": {
+  "fields": [
+    { "name": "NID_MESSAGE", "bits": 8 },
+    { "name": "L_MESSAGE",   "bits": 10 },
+    { "name": "T_TRAIN",     "bits": 32 },
+    { "name": "M_ACK",       "bits": 1 },
+    { "name": "NID_LRBG",    "bits": 24 }
+  ],
+  "values": {
+    "NID_MESSAGE": 39,
+    "L_MESSAGE": 74,
+    "T_TRAIN": 0,
+    "M_ACK": 0,
+    "NID_LRBG": 16777214
+  }
+},
+
+  "message40": {
+    "fields": [
+      { "name": "NID_MESSAGE",  "bits": 8 },
+      { "name": "L_MESSAGE",    "bits": 10 },
+      { "name": "T_TRAIN",      "bits": 32 },
+      { "name": "M_ACK",        "bits": 1 },
+      { "name": "NID_LRBG",     "bits": 24 }
+    ],
+    "values": {
+      "NID_MESSAGE": 40,
+      "L_MESSAGE": 0,
+      "T_TRAIN": 0,
+      "M_ACK": 0,
+      "NID_LRBG": 0
+    }
+  },
+
+  "message41": {
+    "fields": [
+      { "name": "NID_MESSAGE",  "bits": 8 },
+      { "name": "L_MESSAGE",    "bits": 10 },
+      { "name": "T_TRAIN",      "bits": 32 },
+      { "name": "M_ACK",        "bits": 1 },
+      { "name": "NID_LRBG",     "bits": 24 }
+    ],
+    "values": {
+      "NID_MESSAGE": 41,
+      "L_MESSAGE": 75,
+      "T_TRAIN": 0,
+      "M_ACK": 1,
+      "NID_LRBG": 16777214
+    }
+  },
+
+  "message129": {
+    "fields": [
+      { "name": "NID_MESSAGE",   "bits": 8 },
+      { "name": "L_MESSAGE",     "bits": 10 },
+      { "name": "T_TRAIN",       "bits": 32 },
+      { "name": "NID_ENGINE",    "bits": 24 }
+    ],
+    "values": {
+      "NID_MESSAGE": 129,
+      "L_MESSAGE": 74,
+      "T_TRAIN": 0,
+      "NID_ENGINE": 1234
+    }
+  },
+
+  "message132": {
+    "fields": [
+      { "name": "NID_MESSAGE",      "bits": 8 },
+      { "name": "L_MESSAGE",        "bits": 10 },
+      { "name": "T_TRAIN",          "bits": 32 },
+      { "name": "NID_ENGINE",       "bits": 24 },
+      { "name": "Q_MARQSTREASON",   "bits": 4 } 
+    ],
+    "values": {
+      "NID_MESSAGE": 132,
+      "L_MESSAGE": 74,
+      "T_TRAIN": 0,
+      "NID_ENGINE": 1234,
+      "Q_MARQSTREASON": 0
+    }
+  },
+  "message136": {
+  "fields": [
+    { "name": "NID_MESSAGE", "bits": 8 },
+    { "name": "L_MESSAGE",   "bits": 10 },
+    { "name": "T_TRAIN",     "bits": 32 },
+    { "name": "NID_ENGINE",  "bits": 24 }
+  ],
+  "values": {
+    "NID_MESSAGE": 136,
+    "L_MESSAGE": 110,
+    "T_TRAIN": 0,
+    "NID_ENGINE": 1234
+  },
+  "subPackets": ["packet0"]
+},
+
+
+  "message137": {
+    "fields": [
+      { "name": "NID_MESSAGE",   "bits": 8 },
+      { "name": "L_MESSAGE",     "bits": 10 },
+      { "name": "T_TRAIN",       "bits": 32 },
+      { "name": "NID_ENGINE",    "bits": 24 },
+      { "name": "T_TRAIN_ref",   "bits": 32 } 
+    ],
+    "values": {
+      "NID_MESSAGE": 137,
+      "L_MESSAGE": 80,
+      "T_TRAIN": 0,
+      "NID_ENGINE": 1234,
+      "T_TRAIN_ref": 0
+    }
+  },
+
+
+  "message138": {
+    "fields": [
+      { "name": "NID_MESSAGE",   "bits": 8 },
+      { "name": "L_MESSAGE",     "bits": 10 },
+      { "name": "T_TRAIN",       "bits": 32 },
+      { "name": "NID_ENGINE",    "bits": 24 },
+      { "name": "T_TRAIN_ref",   "bits": 32 }
+    ],
+    "values": {
+      "NID_MESSAGE": 138,
+      "L_MESSAGE": 80,
+      "T_TRAIN": 0,
+      "NID_ENGINE": 1234,
+      "T_TRAIN_ref": 0
+    }
+  },
+
+
+  "message146": {
+    "fields": [
+      { "name": "NID_MESSAGE",    "bits": 8 },
+      { "name": "L_MESSAGE",      "bits": 10 },
+      { "name": "T_TRAIN",        "bits": 32 },
+      { "name": "NID_ENGINE",     "bits": 24 },
+      { "name": "T_TRAIN_ack",    "bits": 32 }
+    ],
+    "values": {
+      "NID_MESSAGE": 146,
+      "L_MESSAGE": 106,
+      "T_TRAIN": 0,
+      "NID_ENGINE": 1234,
+      "T_TRAIN_ack": 0
+    }
+  },
+
+  "message150": {
+  "fields": [
+    { "name": "NID_MESSAGE", "bits": 8 },
+    { "name": "L_MESSAGE",   "bits": 10 },
+    { "name": "T_TRAIN",     "bits": 32 },
+    { "name": "NID_ENGINE",  "bits": 24 },
+    { "name": "Q_DESK",      "bits": 1 }
+  ],
+  "values": {
+    "NID_MESSAGE": 150,
+    "L_MESSAGE": 75,
+    "T_TRAIN": 0,
+    "NID_ENGINE": 1234,
+    "Q_DESK": 0
+  },
+  "subPackets": ["packet0"]
+},
+
+  "message154": {
+    "fields": [
+      { "name": "NID_MESSAGE",   "bits": 8 },
+      { "name": "L_MESSAGE",     "bits": 10 },
+      { "name": "T_TRAIN",       "bits": 32 },
+      { "name": "NID_ENGINE",    "bits": 24 }
+    ],
+    "values": {
+      "NID_MESSAGE": 154,
+      "L_MESSAGE": 74,
+      "T_TRAIN": 0,
+      "NID_ENGINE": 1234
+    }
+  },
+
+
+  "message155": {
+    "fields": [
+      { "name": "NID_MESSAGE",   "bits": 8 },
+      { "name": "L_MESSAGE",     "bits": 10 },
+      { "name": "T_TRAIN",       "bits": 32 },
+      { "name": "NID_ENGINE",    "bits": 24 }
+    ],
+    "values": {
+      "NID_MESSAGE": 155,
+      "L_MESSAGE": 74,
+      "T_TRAIN": 0,
+      "NID_ENGINE": 1234
+    }
+  },
+
+  "message156": {
+  "fields": [
+    { "name": "NID_MESSAGE", "bits": 8 },
+    { "name": "L_MESSAGE",   "bits": 10 },
+    { "name": "T_TRAIN",     "bits": 32 },
+    { "name": "NID_ENGINE",  "bits": 24 }
+  ],
+  "values": {
+    "NID_MESSAGE": 156,
+    "L_MESSAGE": 74,
+    "T_TRAIN": 0,
+    "NID_ENGINE": 1234
+  }
+},
+
+
+  "message157": {
+    "fields": [
+      { "name": "NID_MESSAGE",    "bits": 8 },
+      { "name": "L_MESSAGE",      "bits": 10 },
+      { "name": "T_TRAIN",        "bits": 32 },
+      { "name": "NID_ENGINE",     "bits": 24 },
+      { "name": "Q_STATUSLRBG",   "bits": 2 }
+    ],
+    "values": {
+      "NID_MESSAGE": 157,
+      "L_MESSAGE": 0,
+      "T_TRAIN": 0,
+      "NID_ENGINE": 0,
+      "Q_STATUSLRBG": 1
+    },
+    "subPackets": ["packet0"]
+  },
+
+
+  "message159": {
+    "fields": [
+      { "name": "NID_MESSAGE",   "bits": 8 },
+      { "name": "L_MESSAGE",     "bits": 10 },
+      { "name": "T_TRAIN",       "bits": 32 },
+      { "name": "NID_ENGINE",    "bits": 24 }
+    ],
+    "values": {
+      "NID_MESSAGE": 159,
+      "L_MESSAGE": 74,
+      "T_TRAIN": 0,
+      "NID_ENGINE": 1234
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "amqplib": "^0.10.9",
+    "bit-buffer": "^0.3.0",
+    "crypto-js": "^4.2.0",
+    "mqtt": "^5.15.0"
+  }
+}
