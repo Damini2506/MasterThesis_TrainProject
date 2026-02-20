@@ -24,6 +24,8 @@ const OBU_ID = "OBU1234";
 // If your Remote OBU UI uses fixed train number:
 const TRAIN_FIXED = "TRAIN01";
 
+const TRAIN_CMD_META_TOPIC = "obu/train/meta"; // shadow cmd from Remote OBU
+
 // ===== topics for auto stop =====
 const LOCAL_AI_ALERT_TOPIC = "obu/ai/alert";              // produced by AI pipeline (Pi)
 const TRAIN_CMD_TOPIC = "obu/train";                      // ESP32 subscribes here
@@ -246,6 +248,27 @@ const processMessage = (topic, payloadBuf) => {
 
     const raw = payloadBuf.toString();
     const msg = JSON.parse(raw);
+    
+    // ===== KPI: TRAIN START/STOP meta received at OBU =====
+    if (topic === TRAIN_CMD_META_TOPIC && msg?.type === "TRAIN_CMD_META" && msg?.cmd_id) {
+      const t_obu_recv_ms = Date.now();
+
+      publish(
+        TRAIN_STATUS_TOPIC,
+        {
+          type: "TRAIN_CMD_ACK",
+          cmd: msg.cmd ?? null,
+          cmd_id: msg.cmd_id,
+          t_cmd_send_ms: msg.t_cmd_send_ms ?? null, // remote timestamp (for correlation only)
+          t_obu_recv_ms,                            // OBU timestamp (this is your real KPI point)
+          ack_from: "obu_rpi"
+        },
+        { qos: 1 }
+      );
+
+      logger.log(`? TRAIN_CMD_META RX ? ACK sent | ${msg.cmd} | ${msg.cmd_id}`);
+      return;
+    }
 
     // ===== KPI: AI ACK received at OBU =====
     if (msg?.type === "AI_ACK" && msg?.msg_id) {
@@ -271,7 +294,11 @@ const processMessage = (topic, payloadBuf) => {
     
     const allowedHandshake = ["AU2"];
     const isHandshake = topic.endsWith("/handshake") && allowedHandshake.includes(msg.type);
-    const isPiTopic = (topic === "obu/status" || topic.startsWith("obu/ai/") || topic.startsWith("obu/safety/"));
+    const isPiTopic =
+    (topic === "obu/status" ||
+     topic === TRAIN_CMD_META_TOPIC ||
+     topic.startsWith("obu/ai/") ||
+     topic.startsWith("obu/safety/"));
 
     // Keep your original filter (so random topics don't flood this OBU)
     if (msg.origin !== "amqp" && topic !== `esp32/${RBC_ID}/sensor` && !isHandshake && !isPiTopic) return;
@@ -520,6 +547,7 @@ mqttClient.on("connect", () => {
 
   // already covers obu/ai/alert too (plus any other pi topics)
   subscribe(["obu/status", "obu/ai/#", "obu/safety/#"], { qos: 1 });
+  subscribe(TRAIN_CMD_META_TOPIC, { qos: 1 });
 
   startHandshake(); // auto
 });

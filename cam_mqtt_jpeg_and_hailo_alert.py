@@ -180,6 +180,12 @@ AI_SENT_TTL_MS = 60_000  # keep 60s history max
 last_ai_rtt_ms = None
 last_ai_rtt_ts_ms = None
 
+TOPIC_CAM_ACK = "obu/cam/ack"
+
+cam_lock = threading.Lock()
+cam_sent_ts = {}          # frame_id -> t_send_mono_ns, t_send_ms
+CAM_SENT_TTL_MS = 10_000  # keep 10s
+
 # =========================
 # Helpers
 # =========================
@@ -285,6 +291,44 @@ def publish_status(client, service, state, extra=None):
 def on_message(client, userdata, msg):
     global dataset_active, dataset_until, last_dataset_ts, ai_sent_ts
     global last_ai_rtt_ms, last_ai_rtt_ts_ms
+    
+    if msg.topic == TOPIC_CAM_ACK:
+        try:
+            ack = json.loads(msg.payload.decode("utf-8", errors="ignore"))
+        except Exception:
+            return
+        if not isinstance(ack, dict) or ack.get("type") != "CAM_ACK":
+            return
+
+        frame_id = ack.get("frame_id")
+        if frame_id is None:
+            return
+
+        t_ack_recv_mono = time.monotonic_ns()
+        t_ack_recv_ms = now_ms()
+
+        with cam_lock:
+            rec = cam_sent_ts.get(int(frame_id))
+        if not rec:
+            return
+
+        rtt_ms = (t_ack_recv_mono - int(rec["t_send_mono_ns"])) / 1e6
+        e2e_est_ms = rtt_ms / 2.0
+
+        payload_qos = json.dumps({
+            "type": "VIDEO_RTT",
+            "frame_id": int(frame_id),
+            "rtt_ms": float(rtt_ms),
+            "e2e_est_ms": float(e2e_est_ms),
+            "t_send_ms": int(rec["t_send_ms"]),
+            "t_ack_recv_ms": int(t_ack_recv_ms),
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "origin": "pi",
+            "plane": "video"
+        })
+
+        (CLIENT_CTRL or client).publish(TOPIC_QOS, payload_qos, qos=0, retain=False)
+        return
 
     # ---- AI ACK handler (RTT measured on Pi; no clock sync needed) ----
     if msg.topic == TOPIC_AI_ACK:
@@ -702,6 +746,7 @@ def main():
     client_ctrl.loop_start()
     client_ctrl.subscribe(TOPIC_CMD, qos=1)
     client_ctrl.subscribe(TOPIC_AI_ACK, qos=1)
+    client_ctrl.subscribe(TOPIC_CAM_ACK, qos=0)
 
     client_video = mqtt.Client(client_id="pi_cam_video")
     client_video.connect(BROKER_IP, BROKER_PORT_VIDEO, keepalive=30)
@@ -797,6 +842,18 @@ def main():
                         jpeg_bytes = encode_jpeg_from_rgb(pub_rgb, JPEG_QUALITY)
 
                         t_jpeg_send_ms = now_ms()
+                        
+                        t_jpeg_send_mono_ns = time.monotonic_ns()
+                        with cam_lock:
+                            cam_sent_ts[int(frame_id)] = {
+                                "t_send_ms": int(t_jpeg_send_ms),
+                                "t_send_mono_ns": int(t_jpeg_send_mono_ns),
+                            }
+                            cutoff = now_ms() - CAM_SENT_TTL_MS
+                            for k in list(cam_sent_ts.keys()):
+                                if cam_sent_ts[k]["t_send_ms"] < cutoff:
+                                    cam_sent_ts.pop(k, None)
+                        
                         client_video.publish(
                             TOPIC_CAM,
                             payload=jpeg_bytes,
