@@ -1,0 +1,1810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Dynamic RBC Simulator with ETCS MA</title>
+  <script src="./libs/mqtt.min.js"></script>
+
+<script src="./libs/crypto-js.min.js"></script>
+<script>
+  window.CryptoJS = window.CryptoJS || CryptoJS;
+</script>
+
+  <style>
+    body { background-color: black; color: white; font-family: sans-serif; }
+    svg { background-color: black; }
+    .track { stroke-width: 4; stroke: rgb(42, 173, 42); fill: none; transition: stroke 0.3s ease; }
+    .active { stroke: red !important; }
+    .occupied { stroke: url(#redYellowStripes) !important; }
+    .sensor { fill: white; cursor: pointer; opacity: 0.8; }
+    .sensor-label { fill: yellow; font-size: 10px; pointer-events: none; font-weight: bold; }
+    .label { fill: white; font-size: 12px; pointer-events: none; }
+    .switch-label { fill: white; font-size: 12px; font-weight: bold; pointer-events: none; }
+    .station-label { fill: cyan; font-size: 14px; font-weight: bold; }
+    button, select, label { margin: 5px; }
+    #container { display: flex; align-items: flex-start; }
+    #left { flex: 2; }
+    #right { flex: 1; margin-left: 20px; }
+    table { border-collapse: collapse; width: 100%; font-size: 12px; }
+    th, td { border: 1px solid white; padding: 4px; text-align: left; }
+    th { background-color: #333; }
+    .route-info { background-color: #222; padding: 10px; margin-top: 10px; border-radius: 5px; }
+    .alternate-route { color: #ffaa00; font-weight: bold; }
+    #sciRbcLog { border:1px solid #888; padding:5px; height:150px; overflow-y:auto; margin-top:10px; }
+    #maDisplay { background-color: #1a1a1a; border: 1px solid #444; padding: 10px; margin-top: 10px; border-radius: 5px; font-family: monospace; font-size: 12px; }
+    #maDisplay h3 { color: #00ff00; margin-top: 0; }
+    .ma-section { margin: 5px 0; padding: 5px; background-color: #2a2a2a; border-radius: 3px; }
+    .ma-field { color: #00aaff; }
+    #infoIcon { position: fixed; top: 10px; right: 10px; font-size: 20px; cursor: pointer; color: #ffaa00; z-index: 1000; background-color: #333; border-radius: 50%; width: 30px; height: 30px; text-align: center; line-height: 30px; border: 2px solid #000000; }
+    #infoIcon:hover { background-color: #555; }
+    #infoModal { display: none; position: fixed; z-index: 2000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.8); }
+    #infoModalContent { background-color: #222; margin: 5% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 500px; color: white; border-radius: 5px; font-size: 13px; max-height: 80vh; overflow-y: auto; position: relative; }
+    #infoModalContent h3 { color: #ffaa00; margin-top: 10px; }
+    #infoModalClose { color: #aaa; float: right; font-size: 28px; cursor: pointer; font-weight: bold; }
+    #infoModalClose:hover { color: white; }
+    .station-info { font-size: 11px; color: #aaa; }
+    /* Animation for partial track overlays */
+    @keyframes dash {
+      to { stroke-dashoffset: -15; }
+    }
+  </style>
+  <style>
+  .track.active {
+    stroke: red;
+    stroke-width: 4;
+  }
+</style>
+
+</head>
+<body>
+  <div id="infoIcon" title="Click for help">ℹ️</div>
+  <div id="infoModal">
+    <div id="infoModalContent">
+      <span id="infoModalClose">&times;</span>
+      <h3>Standstill Status</h3>
+      <ul>
+        <li><strong>0x01</strong> All trains assigned to the route are at standstill</li>
+        <li><strong>0x02</strong> At least one train assigned to the route is not at standstill</li>
+        <li><strong>0x03</strong> No train assigned to the route</li>
+      </ul>
+      <h3>MA Status</h3>
+      <ul>
+        <li><strong>0x01</strong> No MA issued for trains assigned to the route</li>
+        <li><strong>0x02</strong> MA issued for at least one train assigned to the route</li>
+        <li><strong>0x03</strong> No train assigned to the route</li>
+      </ul>
+      <h3>EOM Status</h3>
+      <ul>
+        <li><strong>0x01</strong> All train assigned to the route have performed EoM</li>
+        <li><strong>0x02</strong> At least one train assigned to the route has not performed EoM</li>
+        <li><strong>0x03</strong> No train assigned to the route</li>
+      </ul>
+      <h3>TVP Section Status</h3>
+      <ul>
+        <li><strong>0x01</strong> Section occupied</li>
+        <li><strong>0x02</strong> Section vacant</li>
+        <li><strong>0x03</strong> Section failed</li>
+        <li><strong>0xFE</strong> Unknown</li>
+      </ul>
+       <h3>ETCS Packet 15 - Movement Authority</h3>
+      <ul>
+        <li><strong>NID_PACKET</strong> = 15 (Packet identifier)</li>
+        <li><strong>Q_DIR</strong> = 0/1/2 (0=Reverse, 1=Nominal, 2=Both directions)</li>
+        <li><strong>Q_SCALE</strong> = 1 (Scale = 1m)</li>
+        <li><strong>V_EMA</strong> = 0 (Emergency stop if passed)</li>
+        <li><strong>T_EMA</strong> = 1023 (No timer, infinite time)</li>
+        <li><strong>N_ITER</strong> = Number of sections in the route</li>
+        <li><strong>L_SECTION</strong> = Length of each section in meters</li>
+        <li><strong>Q_SECTIONTIMER</strong> = 0 (No section timer)</li>
+        <li><strong>L_ENDSECTION</strong> = 0 (No overlap)</li>
+        <li><strong>Q_DANGERPOINT</strong> = 0 (No danger point)</li>
+      </ul>
+    </div>
+  </div>
+
+  <h1>Dynamic RBC Simulator</h1>
+  <label for="configUpload">Upload topology (XML):</label>
+  <input type="file" id="configUpload" accept=".xml" />
+
+  <div id="container">
+    <div id="left">
+      <select id="routeSelect"><option value="">-- Route Select --</option></select>
+      <select id="occupiedSelect">
+        <option value="">-- Occupancy Control --</option>
+      </select>
+      
+      <p id="statusMsg"></p>
+      <div class="route-info">
+        <p id="currentRoute">Current Route: </p>
+        <p id="alternateRoute"></p>
+      </div>
+      <svg id="topologySVG" viewBox="0 0 800 300" width="100%" height="300"></svg>
+
+        <div id="etcsLogger" style="border: 1px solid #888; padding: 6px; height: 150px; overflow-y: auto; margin-top: 10px;">
+          <strong>ETCS Log</strong>
+          <div id="etcsLogContent"></div>
+        </div>
+
+      <div id="maDisplay" style="display:none;">
+        <h3>ETCS Packet 15 - Movement Authority</h3>
+        <div id="maContent"></div>
+      </div>
+    </div>
+
+    <button id="grantMaBtn" disabled style="margin-top: 10px; background-color: #28a745; color: white; padding: 6px 12px; border: none; border-radius: 4px;">Grant MA Request</button>
+
+    <script>
+      // Grant MA manually when button clicked
+document.getElementById("grantMaBtn").addEventListener("click", () => {
+  const routeSelect = document.getElementById("routeSelect");
+  if (routeSelect) {
+    window.currentRoute = routeSelect.value;
+  }
+
+  if (window.handlers?.sendMovementAuthorityManually) {
+    window.handlers.sendMovementAuthorityManually();
+    document.getElementById("grantMaBtn").disabled = true; // disable after use
+  }
+});
+
+    </script>
+
+
+    <div id="right">
+      <h2>RBC Log</h2>
+      <table><thead><tr><th>Time</th><th>Message</th></tr></thead><tbody id="logTable"></tbody></table>
+      <h3>SCI-RBC Message Log</h3>
+      <div id="sciRbcLog"></div>
+    </div>
+  </div>
+
+  <script>
+    let stations = {}, tracks = {}, sensors = {}, switches = {};
+    let trackConnections = {}, sensorToTrack = {};
+    let trackRelations = {}; // Will store track-to-track connections
+    let sessionEstablished = true, movementAuthorityGranted = false;
+    window.currentRoute = "";  // ✅ Global
+let currentSensorIdx = 0, originalRouteRequest = "";
+    let dynamicTrackList = null, dynamicSensorOrder = null;
+
+    // ✅ Provide expected sensor to RBC logic
+window.getExpectedSensor = () => {
+  const order = dynamicSensorOrder || window.routeData?.[originalRouteRequest]?.sensors;
+  return order?.[currentSensorIdx];
+};
+
+
+    let switchGroups = {}; // Dynamically populated from XML
+    let currentPacket15 = null; // Store current MA packet
+    let trackOccupancyStatus = {}; // Store current occupancy status of each track
+
+    // SCI-RBC Status Constants
+    const EOM_STATUS = { ALL_TRAINS_EOM: 0x01, AT_LEAST_ONE_NOT_EOM: 0x02, NO_TRAIN_ASSIGNED: 0x03 };
+    const STANDSTILL = { AT_STANDSTILL: 0x01, IN_MOVEMENT: 0x02, UNKNOWN: 0x03 };
+    const MA_STATUS = { NO_MA_ISSUED: 0x01, MA_ISSUED: 0x02, NO_TRAIN_ASSIGNED: 0x03 };
+    const TVP_STATUS = { OCCUPIED: 0x01, VACANT: 0x02, FAILED: 0x03, UNKNOWN: 0xFE };
+
+    // ETCS Packet 15 structure according to Subset-026
+    class Packet15_MovementAuthority {
+      constructor() {
+        this.NID_PACKET = 15;  // Packet identifier
+        this.Q_DIR = 1;        // Will be set dynamically: 0 = Reverse, 1 = Nominal, 2 = Both
+        this.L_PACKET = 0;     // Will be calculated
+        this.Q_SCALE = 1;      // 1 = 1m scale
+        this.V_EMA = 0;        // 0 = Emergency stop if passed
+        this.T_EMA = 1023;     // 1023 = No timer (infinite)
+        this.N_ITER = 0;       // Number of sections
+        this.sections = [];    // Array of {L_SECTION, Q_SECTIONTIMER, T_SECTIONTIMER, D_SECTIONTIMERSTOPLOC}
+        this.L_ENDSECTION = 0; // No overlap
+        this.Q_SECTIONTIMER = 0; // No section timer for end section
+        this.T_SECTIONTIMER = 0;
+        this.D_SECTIONTIMERSTOPLOC = 0;
+        this.Q_ENDTIMER = 0;   // No end timer
+        this.T_ENDTIMER = 0;
+        this.D_ENDTIMERSTARTLOC = 0;
+        this.Q_DANGERPOINT = 0; // No danger point
+        this.D_DP = 0;
+        this.V_RELEASEDP = 0;
+        this.Q_OVERLAP = 0;    // No overlap
+        this.D_STARTOL = 0;
+        this.T_OL = 0;
+        this.D_OL = 0;
+        this.V_RELEASEOL = 0;
+      }
+
+      addSection(length) {
+        this.sections.push({
+          L_SECTION: Math.round(length), // Length in meters
+          Q_SECTIONTIMER: 0,  // No timer
+          T_SECTIONTIMER: 0,
+          D_SECTIONTIMERSTOPLOC: 0
+        });
+        this.N_ITER = this.sections.length;
+      }
+
+      calculatePacketLength() {
+        // Calculate L_PACKET based on the number of fields
+        // Base fields + N_ITER * (fields per section)
+        this.L_PACKET = 93 + (this.N_ITER * 46); // Simplified calculation
+      }
+
+      getDirectionString() {
+        switch(this.Q_DIR) {
+          case 0: return "Reverse";
+          case 1: return "Nominal";
+          case 2: return "Both directions";
+          default: return "Unknown";
+        }
+      }
+
+      toString() {
+        let str = `NID_PACKET: ${this.NID_PACKET}\n`;
+        str += `Q_DIR: ${this.Q_DIR} (${this.getDirectionString()})\n`;
+        str += `L_PACKET: ${this.L_PACKET} bits\n`;
+        str += `Q_SCALE: ${this.Q_SCALE} (1m)\n`;
+        str += `V_EMA: ${this.V_EMA} km/h (Emergency stop)\n`;
+        str += `T_EMA: ${this.T_EMA} (No timer)\n`;
+        str += `N_ITER: ${this.N_ITER} sections\n\n`;
+        
+        this.sections.forEach((section, idx) => {
+          str += `Section ${idx + 1}:\n`;
+          str += `  L_SECTION: ${section.L_SECTION} m\n`;
+          str += `  Q_SECTIONTIMER: ${section.Q_SECTIONTIMER} (No timer)\n`;
+        });
+        
+        str += `\nL_ENDSECTION: ${this.L_ENDSECTION} m\n`;
+        str += `Q_DANGERPOINT: ${this.Q_DANGERPOINT} (No danger point)\n`;
+        
+        return str;
+      }
+    }
+
+    // Parse net relations from XML
+    function parseTrackRelations(xml) {
+      trackRelations = {};
+      
+      // Parse net relations
+      Array.from(xml.querySelectorAll('netRelation')).forEach(relation => {
+        const elementA = relation.getAttribute('elementA');
+        const elementB = relation.getAttribute('elementB');
+        const elementC = relation.getAttribute('elementC');
+        
+        // Initialize if not exists
+        if (!trackRelations[elementA]) {
+          trackRelations[elementA] = [];
+        }
+        
+        // Add elementB to elementA's connections
+        if (elementB && !trackRelations[elementA].includes(elementB)) {
+          trackRelations[elementA].push(elementB);
+        }
+        
+        // Add elementC to elementA's connections (if exists)
+        if (elementC && !trackRelations[elementA].includes(elementC)) {
+          trackRelations[elementA].push(elementC);
+        }
+      });
+      
+      console.log('Track Relations:', trackRelations);
+    }
+
+    // Calculate distance between two points
+    function calculateDistance(x1, y1, x2, y2) {
+      return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
+    }
+
+    // Determine movement direction based on track orientation
+    function determineMovementDirection(trackList, fromStation, toStation) {
+      // Q_DIR: 0 = Reverse, 1 = Nominal, 2 = Both directions
+      // We'll consider "nominal" as moving in the direction from->to of tracks
+      // and "reverse" as moving against the track definition
+      
+      let nominalCount = 0;
+      let reverseCount = 0;
+      
+      // Build node sequence to understand movement direction
+      let currentNode = fromStation;
+      const visitedNodes = new Set([currentNode]);
+      
+      for (const trackId of trackList) {
+        const track = tracks[trackId];
+        if (!track) continue;
+        
+        if (track.from === currentNode && !visitedNodes.has(track.to)) {
+          // Moving in nominal direction (from -> to)
+          nominalCount++;
+          currentNode = track.to;
+          visitedNodes.add(track.to);
+        } else if (track.to === currentNode && !visitedNodes.has(track.from)) {
+          // Moving in reverse direction (to -> from)
+          reverseCount++;
+          currentNode = track.from;
+          visitedNodes.add(track.from);
+        }
+      }
+      
+      // Determine overall direction
+      if (nominalCount > 0 && reverseCount === 0) {
+        return 1; // Purely nominal direction
+      } else if (reverseCount > 0 && nominalCount === 0) {
+        return 0; // Purely reverse direction
+      } else if (nominalCount > 0 && reverseCount > 0) {
+        return 2; // Both directions (mixed)
+      }
+      
+      return 1; // Default to nominal if unclear
+    }
+
+    // Generate Packet 15 for a route
+    function generatePacket15ForRoute(trackList, routeId, fromCurrentPosition = null) {
+      const packet = new Packet15_MovementAuthority();
+      
+      // Get sensors on the path
+      const sensorsOnPath = getSensorsOnPath(trackList);
+      const [fromStation, toStation] = routeId.split('_');
+      
+      // Determine movement direction
+      packet.Q_DIR = determineMovementDirection(trackList, fromStation, toStation);
+      
+      // Build node sequence for the entire path
+      const nodeSequence = [];
+      let currentNode = fromCurrentPosition || fromStation;
+      nodeSequence.push(currentNode);
+      
+      // Follow the track path to build complete node sequence
+      for (const trackId of trackList) {
+        const track = tracks[trackId];
+        if (!track) continue;
+        
+        let nextNode = null;
+        if (track.from === currentNode && !nodeSequence.includes(track.to)) {
+          nextNode = track.to;
+        } else if (track.to === currentNode && !nodeSequence.includes(track.from)) {
+          nextNode = track.from;
+        }
+        
+        if (nextNode  && !nodeSequence.includes(nextNode)){
+          nodeSequence.push(nextNode);
+          currentNode = nextNode;
+        }
+      }
+      
+      // If calculating from current position, filter out sensors already passed
+      let relevantSensors = sensorsOnPath;
+      if (fromCurrentPosition) {
+        const currentPosIndex = nodeSequence.indexOf(fromCurrentPosition);
+        relevantSensors = sensorsOnPath.filter(sensor => {
+          const sensorIndex = nodeSequence.indexOf(sensor);
+          return sensorIndex > currentPosIndex;
+        });
+      }
+      
+      // Calculate sections between consecutive sensors
+      if (relevantSensors.length >= 2) {
+        for (let i = 0; i < relevantSensors.length - 1; i++) {
+          const currentSensor = relevantSensors[i];
+          const nextSensor = relevantSensors[i + 1];
+          let sectionLength = 0;
+          
+          // Find the indices of these sensors in the node sequence
+          const currentIdx = nodeSequence.indexOf(currentSensor);
+          const nextIdx = nodeSequence.indexOf(nextSensor);
+          
+          if (currentIdx !== -1 && nextIdx !== -1 && nextIdx > currentIdx) {
+            // Calculate length by following the path between sensors
+            for (let j = currentIdx; j < nextIdx; j++) {
+              const fromNode = nodeSequence[j];
+              const toNode = nodeSequence[j + 1];
+              
+              // Find the track connecting these consecutive nodes
+              for (const trackId of trackList) {
+                const track = tracks[trackId];
+                if (track && 
+                    ((track.from === fromNode && track.to === toNode) ||
+                     (track.to === fromNode && track.from === toNode))) {
+                  sectionLength += calculateDistance(track.x1, track.y1, track.x2, track.y2);
+                  break;
+                }
+              }
+            }
+          }
+          
+          if (sectionLength > 0) {
+            packet.addSection(sectionLength);
+          }
+        }
+      }
+      
+      // Calculate section from current position to first sensor if needed
+      if (fromCurrentPosition && relevantSensors.length > 0) {
+        const firstSensor = relevantSensors[0];
+        const currentPosIdx = nodeSequence.indexOf(fromCurrentPosition);
+        const firstSensorIdx = nodeSequence.indexOf(firstSensor);
+        
+        if (currentPosIdx !== -1 && firstSensorIdx !== -1 && firstSensorIdx > currentPosIdx) {
+          let firstSectionLength = 0;
+          
+          for (let j = currentPosIdx; j < firstSensorIdx; j++) {
+            const fromNode = nodeSequence[j];
+            const toNode = nodeSequence[j + 1];
+            
+            for (const trackId of trackList) {
+              const track = tracks[trackId];
+              if (track && 
+                  ((track.from === fromNode && track.to === toNode) ||
+                   (track.to === fromNode && track.from === toNode))) {
+                firstSectionLength += calculateDistance(track.x1, track.y1, track.x2, track.y2);
+                break;
+              }
+            }
+          }
+          
+          if (firstSectionLength > 0) {
+            // Insert as first section
+            packet.sections.unshift({
+              L_SECTION: Math.round(firstSectionLength),
+              Q_SECTIONTIMER: 0,
+              T_SECTIONTIMER: 0,
+              D_SECTIONTIMERSTOPLOC: 0
+            });
+            packet.N_ITER = packet.sections.length;
+          }
+        }
+      }
+      
+      // Calculate End Section (from last sensor to destination station)
+      if (relevantSensors.length > 0) {
+        const lastSensor = relevantSensors[relevantSensors.length - 1];
+        let endSectionLength = 0;
+        
+        // Find indices in node sequence
+        const lastSensorIdx = nodeSequence.indexOf(lastSensor);
+        const destinationIdx = nodeSequence.indexOf(toStation);
+        
+        if (lastSensorIdx !== -1 && destinationIdx !== -1 && destinationIdx > lastSensorIdx) {
+          // Calculate length from last sensor to destination
+          for (let j = lastSensorIdx; j < destinationIdx; j++) {
+            const fromNode = nodeSequence[j];
+            const toNode = nodeSequence[j + 1];
+            
+            // Find the track connecting these consecutive nodes
+            for (const trackId of trackList) {
+              const track = tracks[trackId];
+              if (track && 
+                  ((track.from === fromNode && track.to === toNode) ||
+                   (track.to === fromNode && track.from === toNode))) {
+                endSectionLength += calculateDistance(track.x1, track.y1, track.x2, track.y2);
+                break;
+              }
+            }
+          }
+        }
+        
+        packet.L_ENDSECTION = Math.round(endSectionLength);
+      } else {
+        // If no sensors ahead, calculate from current position to destination
+        let totalLength = 0;
+        const startIdx = nodeSequence.indexOf(fromCurrentPosition || fromStation);
+        const endIdx = nodeSequence.indexOf(toStation);
+        
+        if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+          for (let j = startIdx; j < endIdx; j++) {
+            const fromNode = nodeSequence[j];
+            const toNode = nodeSequence[j + 1];
+            
+            for (const trackId of trackList) {
+              const track = tracks[trackId];
+              if (track && 
+                  ((track.from === fromNode && track.to === toNode) ||
+                   (track.to === fromNode && track.from === toNode))) {
+                totalLength += calculateDistance(track.x1, track.y1, track.x2, track.y2);
+                break;
+              }
+            }
+          }
+        }
+        
+        packet.L_ENDSECTION = Math.round(totalLength);
+      }
+      
+      packet.calculatePacketLength();
+      return packet;
+    }
+
+    // Display Packet 15 in the UI
+    function displayPacket15(packet) {
+      const display = document.getElementById('maDisplay');
+      const content = document.getElementById('maContent');
+      
+      if (!packet) {
+        display.style.display = 'none';
+        return;
+      }
+      
+      display.style.display = 'block';
+      
+      let html = '<div class="ma-section">';
+      html += `<span class="ma-field">NID_PACKET:</span> ${packet.NID_PACKET}<br>`;
+      html += `<span class="ma-field">Q_DIR:</span> ${packet.Q_DIR} (${packet.getDirectionString()})<br>`;
+      html += `<span class="ma-field">L_PACKET:</span> ${packet.L_PACKET} bits<br>`;
+      html += `<span class="ma-field">Q_SCALE:</span> ${packet.Q_SCALE} (1 meter)<br>`;
+      html += `<span class="ma-field">V_EMA:</span> ${packet.V_EMA} km/h (Emergency stop if passed)<br>`;
+      html += `<span class="ma-field">T_EMA:</span> ${packet.T_EMA} (No timer - infinite)<br>`;
+      html += `<span class="ma-field">N_ITER:</span> ${packet.N_ITER} sections<br>`;
+      html += '</div>';
+      
+      // Display each section
+      if (packet.N_ITER > 0) {
+        html += '<div class="ma-section" style="background-color: #2a1a1a;">';
+        html += '<strong>Track Sections (from current position):</strong><br>';
+        html += '</div>';
+        
+        packet.sections.forEach((section, idx) => {
+          html += '<div class="ma-section">';
+          html += `<strong>Section ${idx + 1}:</strong><br>`;
+          html += `<span class="ma-field">L_SECTION:</span> ${section.L_SECTION} meters<br>`;
+          html += `<span class="ma-field">Q_SECTIONTIMER:</span> ${section.Q_SECTIONTIMER} (No timer)<br>`;
+          html += '</div>';
+        });
+      }
+      
+      // End section info
+      html += '<div class="ma-section" style="background-color: #1a2a1a;">';
+      html += '<strong>End Section (to destination):</strong><br>';
+      html += `<span class="ma-field">L_ENDSECTION:</span> ${packet.L_ENDSECTION} meters<br>`;
+      html += `<span class="ma-field">Q_SECTIONTIMER:</span> ${packet.Q_SECTIONTIMER} (No timer)<br>`;
+      html += `<span class="ma-field">Q_DANGERPOINT:</span> ${packet.Q_DANGERPOINT} (No danger point)<br>`;
+      html += `<span class="ma-field">Q_OVERLAP:</span> ${packet.Q_OVERLAP} (No overlap)<br>`;
+      html += '</div>';
+      
+      // Total distance
+      const totalDistance = packet.sections.reduce((sum, section) => sum + section.L_SECTION, 0) + packet.L_ENDSECTION;
+      html += '<div class="ma-section" style="background-color: #1a3a1a;">';
+      html += `<strong>Total MA Distance:</strong> ${totalDistance} meters<br>`;
+      html += '</div>';
+      
+      content.innerHTML = html;
+    }
+
+    document.getElementById("infoIcon").addEventListener('click', function(e) {
+      e.stopPropagation();
+      document.getElementById("infoModal").style.display = "block";
+    });
+
+    document.getElementById("infoModalClose").addEventListener('click', function() {
+      document.getElementById("infoModal").style.display = "none";
+    });
+
+    // Close modal if clicking outside the content
+    document.getElementById("infoModal").addEventListener('click', function(event) {
+      if (event.target === this) {
+        document.getElementById("infoModal").style.display = "none";
+      }
+    });
+
+    // SCI-RBC Message Functions
+    function createRouteOccupationMessage(routeId, standstillStatus, maStatus, eomStatus = EOM_STATUS.NO_TRAIN_ASSIGNED) {
+      return {
+        protocolType: "0x50",
+        messageType: "0x0018",
+        senderId: "RBC123",
+        receiverId: "IXL123",
+        routeId: routeId.padEnd(20, " "),
+        standstillStatus: standstillStatus,
+        maStatus: maStatus,
+        eomStatus: eomStatus,
+      };
+    }
+
+    // TVP Section Status Message
+    function createTVPSectionStatusMessage(tvpSectionId, status, esi = 0x01) {
+      return {
+        protocolType: "0x50",
+        messageType: "0x0043",
+        senderId: "IXL123",
+        receiverId: "RBC123",
+        tvpSectionId: tvpSectionId.padEnd(20, " "),
+        esi: esi,
+        status: status,
+      };
+    }
+    function getTVPStatusDescription(status) {
+      switch (status) {
+        case TVP_STATUS.OCCUPIED: return "0x01 (Section occupied)";
+        case TVP_STATUS.VACANT: return "0x02 (Section vacant)";
+        case TVP_STATUS.FAILED: return "0x03 (Section failed)";
+        case TVP_STATUS.UNKNOWN: return "0xFE (Unknown)";
+        default: return `0x${status.toString(16).padStart(2, '0')} (Invalid)`;
+      }
+    }
+
+    function getMAStatusDescription(status) {
+      switch (status) {
+        case MA_STATUS.NO_MA_ISSUED: return "0x01";
+        case MA_STATUS.MA_ISSUED: return "0x02";
+        case MA_STATUS.NO_TRAIN_ASSIGNED: return "0x03";
+        default: return `0x${status.toString(16).padStart(2, '0')} (Unknown)`;
+      }
+    }
+
+    function getEOMStatusDescription(status) {
+      switch (status) {
+        case EOM_STATUS.ALL_TRAINS_EOM: return "0x01";
+        case EOM_STATUS.AT_LEAST_ONE_NOT_EOM: return "0x02";
+        case EOM_STATUS.NO_TRAIN_ASSIGNED: return "0x03";
+        default: return `0x${status.toString(16).padStart(2, '0')} (Unknown)`;
+      }
+    }
+
+    function logSciRbc(msg) {
+      const d = document.getElementById('sciRbcLog');
+      const e = document.createElement('div');
+      e.textContent = msg;
+      d.appendChild(e);
+      d.scrollTop = d.scrollHeight;
+    }
+
+// Send TVP Section Status message
+    function sendTVPSectionStatus(trackId, status) {
+      const tvpMsg = createTVPSectionStatusMessage(trackId, status);
+      
+      logSciRbc(
+        `Interlocking → RBC: Msg_TVP_Section_Status
+        Protocol: ${tvpMsg.protocolType}
+        MsgType: ${tvpMsg.messageType}
+        Sender: ${tvpMsg.senderId}
+        Receiver: ${tvpMsg.receiverId}
+        TVPSectionID: ${tvpMsg.tvpSectionId}
+        ESI: 0x${tvpMsg.esi.toString(16).padStart(2, '0')}
+        Status: ${getTVPStatusDescription(tvpMsg.status)}`
+      );
+    }
+    // Helper function to occupy/free switch tracks
+    function setSwitchOccupancy(switchName, occupied) {
+      const tracks = switchGroups[switchName];
+      if (tracks) {
+        tracks.forEach(trackId => {
+          const trackEl = document.getElementById(trackId);
+          if (trackEl) {
+            const wasOccupied = trackEl.classList.contains('occupied');
+            if (occupied) {
+              trackEl.classList.add('occupied');
+              trackOccupancyStatus[trackId] = TVP_STATUS.OCCUPIED;
+              sendTVPSectionStatus(trackId, TVP_STATUS.OCCUPIED);
+            } else {
+              trackEl.classList.remove('occupied');
+              trackOccupancyStatus[trackId] = TVP_STATUS.VACANT;
+              sendTVPSectionStatus(trackId, TVP_STATUS.VACANT);
+            }
+          }
+        });
+      }
+    }
+
+    // File load
+   document.getElementById('configUpload').addEventListener('change', e => {
+  const file = e.target.files[0];
+  const rdr = new FileReader();
+
+  rdr.onload = ev => {
+    parseConfig(ev.target.result);
+    buildTrackConnections();
+    renderSvg();
+    computeRoutes();
+    updateOccupancyControls();
+    initializeTrackStatus();
+
+    // ✅ Build the topology object after XML is loaded
+    const topology = {
+      tracks: window.tracks,
+      stations: window.stations,
+      sensors: window.sensors,
+      switches: window.switches,
+      routeData: window.routeData
+    };
+
+    // ✅ Create handlers *after* XML is loaded
+    window.handlers = createRBCHandlers(etcsManager, mqttClient, mqttAi, logger, TOPIC, updateStatus, topology);
+  };
+
+  rdr.readAsText(file);
+});
+
+    function initializeTrackStatus() {
+        // Initialize all tracks as vacant
+         Object.keys(tracks).forEach(trackId => {
+        trackOccupancyStatus[trackId] = TVP_STATUS.VACANT;
+        });
+    }
+
+    function parseConfig(text){
+      const xml=new DOMParser().parseFromString(text,'application/xml');
+      
+      // First, get all node positions (for both stations and sensors)
+      const nodePositions = {};
+      Array.from(xml.querySelectorAll('node')).forEach(n => {
+        const id = n.getAttribute('id');
+        nodePositions[id] = {
+          x: +n.getAttribute('x'),
+          y: +n.getAttribute('y')
+        };
+      });
+      
+      // Parse stations from the dedicated stations tag
+      stations = {};
+      Array.from(xml.querySelectorAll('station')).forEach(s => {
+        const id = s.getAttribute('id');
+        const position = nodePositions[id];
+        if (position) {
+          stations[id] = {
+            id: id,
+            x: position.x,
+            y: position.y,
+            name: s.getAttribute('name') || id,
+            type: s.getAttribute('type') || 'unknown'
+          };
+        }
+      });
+      
+      // Parse sensors (all nodes that start with 'S' and aren't stations)
+      sensors = {};
+      Object.entries(nodePositions).forEach(([id, pos]) => {
+        if (id.startsWith('S')) {
+          sensors[id] = {
+            id: id,
+            x: pos.x,
+            y: pos.y
+          };
+        }
+      });
+      
+      // Parse tracks with coordinates
+      tracks = {};
+      Array.from(xml.querySelectorAll('track')).forEach(t => {
+        const id = t.getAttribute('id');
+        tracks[id] = {
+          id: id,
+          from: t.getAttribute('from'),
+          to: t.getAttribute('to'),
+          x1: +t.getAttribute('x1'),
+          y1: +t.getAttribute('y1'),
+          x2: +t.getAttribute('x2'),
+          y2: +t.getAttribute('y2')
+        };
+      });
+      
+      // Parse switches from XML
+      switches = {};
+      switchGroups = {};
+      Array.from(xml.querySelectorAll('switch')).forEach(s => {
+        const id = s.getAttribute('id');
+        const x = +s.getAttribute('x');
+        const y = +s.getAttribute('y');
+        const trackIds = s.getAttribute('tracks').split(',').map(t => t.trim());
+        
+        switches[id] = { id, x, y, tracks: trackIds };
+        switchGroups[id] = trackIds;
+      });
+      
+      // Build sensor to track mapping
+      sensorToTrack = {};
+      Array.from(xml.querySelectorAll('sensor')).forEach(s => {
+        const id = s.getAttribute('id');
+        const trackId = s.getAttribute('track');
+        sensorToTrack[id] = trackId;
+        
+        // Enhance sensor info with track association
+        if (sensors[id]) {
+          sensors[id].track = trackId;
+        }
+      });
+      
+      // Also build reverse mapping - which tracks connect to each sensor
+      Object.values(tracks).forEach(track => {
+        if (track.from.startsWith('S') && !sensorToTrack[track.from]) {
+          sensorToTrack[track.from] = track.id;
+        }
+        if (track.to.startsWith('S') && !sensorToTrack[track.to]) {
+          sensorToTrack[track.to] = track.id;
+        }
+      });
+      
+      // Parse track relations at the end
+      parseTrackRelations(xml);
+    }
+
+    function updateOccupancyControls() {
+      const select = document.getElementById('occupiedSelect');
+      select.innerHTML = '<option value="">-- Occupancy Control --</option>';
+      
+      // Add switch controls dynamically
+      Object.keys(switches).forEach(switchId => {
+        select.innerHTML += `<option value="occupy_${switchId}">Occupy Switch ${switchId}</option>`;
+        select.innerHTML += `<option value="free_${switchId}">Free Switch ${switchId}</option>`;
+      });
+      
+      // Add individual track controls for non-switch tracks
+      Object.keys(tracks).forEach(trackId => {
+        // Only add if it's not part of a switch
+        let isPartOfSwitch = false;
+        Object.values(switchGroups).forEach(trackList => {
+          if (trackList.includes(trackId)) isPartOfSwitch = true;
+        });
+        
+        if (!isPartOfSwitch) {
+          select.innerHTML += `<option value="occupy_${trackId}">Occupy ${trackId}</option>`;
+          select.innerHTML += `<option value="free_${trackId}">Free ${trackId}</option>`;
+        }
+      });
+      
+      select.innerHTML += '<option value="free_all">Free all</option>';
+    }
+
+    function buildTrackConnections(){
+      trackConnections = {};
+      
+      // Initialize connections for all nodes (stations and sensors)
+      Object.keys(stations).forEach(id => trackConnections[id] = []);
+      Object.keys(sensors).forEach(id => trackConnections[id] = []);
+      
+      // Build connections based on track endpoints
+      Object.values(tracks).forEach(track => {
+        if (!trackConnections[track.from]) trackConnections[track.from] = [];
+        if (!trackConnections[track.to]) trackConnections[track.to] = [];
+        
+        trackConnections[track.from].push({
+          node: track.to,
+          track: track.id,
+          direction: 'forward'
+        });
+        
+        trackConnections[track.to].push({
+          node: track.from,
+          track: track.id,
+          direction: 'backward'
+        });
+      });
+    }
+
+    // Fixed BFS function that properly finds alternate routes
+    function findPath(start, end, excludeOccupied = false) {
+      const visited = new Set();
+      const queue = [{current: start, path: [], visitedTracks: new Set()}];
+      
+      while (queue.length > 0) {
+        const {current, path, visitedTracks} = queue.shift();
+        
+        if (current === end) {
+          return path;
+        }
+        
+        const nodeKey = `${current}_${Array.from(visitedTracks).sort().join(',')}`;
+        if (visited.has(nodeKey)) continue;
+        visited.add(nodeKey);
+        
+        const connections = trackConnections[current] || [];
+        
+        for (const conn of connections) {
+          // Skip if we've already used this track
+          if (visitedTracks.has(conn.track)) continue;
+          
+          // Skip if track is occupied and we're excluding occupied tracks
+          if (excludeOccupied) {
+            const trackEl = document.getElementById(conn.track);
+            if (trackEl && trackEl.classList.contains('occupied')) {
+              continue;
+            }
+          }
+          
+          const newVisitedTracks = new Set(visitedTracks);
+          newVisitedTracks.add(conn.track);
+          
+          queue.push({
+            current: conn.node,
+            path: [...path, conn.track],
+            visitedTracks: newVisitedTracks
+          });
+        }
+      }
+      
+      return null;
+    }
+
+    function getSensorsOnPath(trackPath) {
+      if (!trackPath || trackPath.length === 0) return [];
+      
+      const pathSensors = [];
+      const visitedNodes = new Set();
+      
+      // Build a sequence of nodes by following the track path
+      const nodeSequence = [];
+      
+      // Find the starting node by checking the first track's connections
+      const firstTrack = tracks[trackPath[0]];
+      if (!firstTrack) return [];
+      
+      // Determine the starting node - it should connect to only one other track in path or be a station
+      let currentNode = null;
+      if (trackPath.length === 1) {
+        // Single track - check which end is a station
+        if (stations[firstTrack.from]) currentNode = firstTrack.from;
+        else if (stations[firstTrack.to]) currentNode = firstTrack.to;
+        else currentNode = firstTrack.from; // Default to from
+      } else {
+        // Multiple tracks - find which end connects to the next track
+        const secondTrack = tracks[trackPath[1]];
+        if (firstTrack.from === secondTrack.from || firstTrack.from === secondTrack.to) {
+          currentNode = firstTrack.to;
+        } else {
+          currentNode = firstTrack.from;
+        }
+      }
+      
+      nodeSequence.push(currentNode);
+      visitedNodes.add(currentNode);
+      
+      // Follow the path to build node sequence
+      for (const trackId of trackPath) {
+        const track = tracks[trackId];
+        if (!track) continue;
+        
+        let nextNode = null;
+        if (track.from === currentNode && !visitedNodes.has(track.to)) {
+          nextNode = track.to;
+        } else if (track.to === currentNode && !visitedNodes.has(track.from)) {
+          nextNode = track.from;
+        }
+        
+        if (nextNode) {
+          nodeSequence.push(nextNode);
+          visitedNodes.add(nextNode);
+          currentNode = nextNode;
+        }
+      }
+      
+      // Extract sensors from node sequence (excluding stations)
+      for (const node of nodeSequence) {
+        if (node.startsWith('S') && sensors[node]) {
+          pathSensors.push(node);
+        }
+      }
+      
+      return pathSensors;
+    }
+
+    function validateRouteAgainstNetRelations(trackPath) {
+      if (!trackPath || trackPath.length < 2) return true; // Single track or empty path is valid
+      
+      // Check each consecutive pair of tracks
+      for (let i = 0; i < trackPath.length - 1; i++) {
+        const currentTrack = trackPath[i];
+        const nextTrack = trackPath[i + 1];
+        
+        // Check if there's a valid relation from current to next track
+        const relations = trackRelations[currentTrack] || [];
+        if (!relations.includes(nextTrack)) {
+          console.log(`Invalid transition: ${currentTrack} -> ${nextTrack} not in net relations`);
+          return false;
+        }
+      }
+      
+      return true;
+    }
+
+    function computeRoutes(){
+      const sel=document.getElementById('routeSelect'); 
+      sel.innerHTML='<option value="">-- Route Select --</option>';
+      
+      const stationIds = Object.keys(stations);
+      const routeData = {};
+      
+      stationIds.forEach(from => {
+        stationIds.forEach(to => {
+          if (from !== to) {
+            const path = findPath(from, to);
+            if (path) {
+              // Validate the path against net relations
+              if (validateRouteAgainstNetRelations(path)) {
+                const routeId = `${from}_${to}`;
+                const fromName = stations[from].name || from;
+                const toName = stations[to].name || to;
+                routeData[routeId] = {
+                  tracks: path,
+                  sensors: getSensorsOnPath(path)
+                };
+                sel.innerHTML += `<option value="${routeId}">${fromName} ➝ ${toName}</option>`;
+              } else {
+                console.log(`Route ${from} -> ${to} excluded due to net relation violations`);
+              }
+            }
+          }
+        });
+      });
+      
+      window.routeData = routeData;
+    }
+
+    async function simulateSequentialRouteChecking(requestedRoute) {
+      const route = window.routeData[requestedRoute];
+      if (!route) return null;
+      
+      // Check if primary route is available
+      const primaryAvailable = route.tracks.every(tid => !document.getElementById(tid).classList.contains('occupied'));
+      
+      let primaryMAStatus = primaryAvailable ? MA_STATUS.MA_ISSUED : MA_STATUS.NO_MA_ISSUED;
+      let primaryEOMStatus = primaryMAStatus === MA_STATUS.MA_ISSUED ? EOM_STATUS.AT_LEAST_ONE_NOT_EOM : EOM_STATUS.NO_TRAIN_ASSIGNED;
+
+      const primaryMsg = createRouteOccupationMessage(requestedRoute, STANDSTILL.AT_STANDSTILL, primaryMAStatus, primaryEOMStatus);
+
+      logSciRbc(
+        `RBC → Interlocking: Msg_Route_Occupation
+        Protocol: ${primaryMsg.protocolType}
+        MsgType: ${primaryMsg.messageType}
+        Sender: ${primaryMsg.senderId}
+        Receiver: ${primaryMsg.receiverId}
+        RouteID: ${primaryMsg.routeId}
+        StandstillStatus: ${primaryMsg.standstillStatus}
+        MAStatus: ${getMAStatusDescription(primaryMsg.maStatus)}
+        EOMStatus: ${getEOMStatusDescription(primaryMsg.eomStatus)}`
+      );
+
+      if (primaryAvailable) {
+        return { route: requestedRoute, isAlternate: false, msg: primaryMsg, tracks: route.tracks, sensors: route.sensors };
+      }
+
+      // Check alternate route
+      const [from, to] = requestedRoute.split('_');
+      const altPath = findPath(from, to, true); // Exclude occupied tracks
+      
+      if (altPath && altPath.length > 0) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        const alternateRoute = `${from}_${to}_ALT`;
+        let alternateMAStatus = MA_STATUS.MA_ISSUED;
+        let alternateEOMStatus = EOM_STATUS.AT_LEAST_ONE_NOT_EOM;
+
+        const alternateMsg = createRouteOccupationMessage(alternateRoute, STANDSTILL.AT_STANDSTILL, alternateMAStatus, alternateEOMStatus);
+
+        logSciRbc(
+          `RBC → Interlocking: Msg_Route_Occupation
+          Protocol: ${alternateMsg.protocolType}
+          MsgType: ${alternateMsg.messageType}
+          Sender: ${alternateMsg.senderId}
+          Receiver: ${alternateMsg.receiverId}
+          RouteID: ${alternateMsg.routeId}
+          StandstillStatus: ${alternateMsg.standstillStatus}
+          MAStatus: ${getMAStatusDescription(alternateMsg.maStatus)}
+          EOMStatus: ${getEOMStatusDescription(alternateMsg.eomStatus)}`
+        );
+
+        return { 
+          route: alternateRoute, 
+          isAlternate: true, 
+          msg: alternateMsg, 
+          tracks: altPath,
+          sensors: getSensorsOnPath(altPath)
+        };
+      }
+
+      return null;
+    }
+
+    function checkRouteAhead() {
+      if (!movementAuthorityGranted) return { canProceed: true, needsReroute: false };
+      
+      const currentTrackList = dynamicTrackList || window.routeData[originalRouteRequest].tracks;
+      const currentSensors = dynamicSensorOrder || window.routeData[originalRouteRequest].sensors;
+      const [origFrom, origTo] = originalRouteRequest.split('_');
+      
+      // Get current position
+      let currentPos = getCurrentPosition();
+      if (!currentPos) currentPos = origFrom;
+      
+      // Check all remaining tracks in the current route for blockages
+      let remainingTracks = [];
+      let foundCurrentPosition = false;
+      
+      // Build list of remaining tracks from current position
+      for (let i = 0; i < currentTrackList.length; i++) {
+        const track = tracks[currentTrackList[i]];
+        if (!track) continue;
+        
+        // Check if we've reached or passed the current position
+        if (!foundCurrentPosition) {
+          if (track.from === currentPos || track.to === currentPos || 
+              (currentSensorIdx === 0 && i === 0)) {
+            foundCurrentPosition = true;
+          }
+        }
+        
+        if (foundCurrentPosition) {
+          remainingTracks.push(currentTrackList[i]);
+        }
+      }
+      
+      // Check if any remaining track is blocked
+      let blockedTrack = null;
+      for (const trackId of remainingTracks) {
+        const trackEl = document.getElementById(trackId);
+        if (trackEl && trackEl.classList.contains('occupied')) {
+          blockedTrack = trackId;
+          break;
+        }
+      }
+      
+      if (blockedTrack) {
+        // Try to find alternate route from current position to destination
+        const altPath = findPath(currentPos, origTo, true);
+        
+        if (altPath && altPath.length > 0) {
+          return { 
+            canProceed: true, 
+            needsReroute: true, 
+            altPath: altPath,
+            blockedTrack: blockedTrack 
+          };
+        } else {
+          return { canProceed: false, needsReroute: false, blockedTrack: blockedTrack };
+        }
+      }
+      
+      return { canProceed: true, needsReroute: false };
+    }
+
+    function getCurrentPosition() {
+      const sensors = dynamicSensorOrder || window.routeData[originalRouteRequest].sensors;
+      
+      if (currentSensorIdx === 0) {
+        return originalRouteRequest.split('_')[0];
+      } else if (currentSensorIdx > 0 && currentSensorIdx <= sensors.length) {
+        return sensors[currentSensorIdx - 1];
+      }
+      
+      return originalRouteRequest.split('_')[0];
+    }
+
+    function handleSensorClick(id){
+      if(!movementAuthorityGranted){ log(`⚠️ Unauthorized movement at ${id}`); return; }
+      
+      const order = dynamicSensorOrder || window.routeData[originalRouteRequest].sensors;
+      const trackList = dynamicTrackList || window.routeData[originalRouteRequest].tracks;
+      const exp = order[currentSensorIdx]; 
+      
+      if(id !== exp){ 
+        log(`❌ Incorrect sensor ${id}. Expected ${exp}`); 
+        return; 
+      }
+      
+      // Check route ahead BEFORE moving
+      const routeCheck = checkRouteAhead();
+      
+      if (!routeCheck.canProceed) {
+        log(`⛔ Cannot proceed: Route blocked at ${routeCheck.blockedTrack}. No alternate route available.`); 
+        return;
+      }
+      
+      // If rerouting is needed, do it now
+      if (routeCheck.needsReroute) {
+        const [origFrom, origTo] = originalRouteRequest.split('_');
+        const currentPos = getCurrentPosition();
+        
+        // Get sensors on the alternate path
+        const altSensors = getSensorsOnPath(routeCheck.altPath);
+        
+        // Find which sensors are still ahead on the alternate route
+        let sensorsAhead = [];
+        
+        // Build node sequence for alternate path to properly identify sensors ahead
+        const altNodeSequence = [];
+        let currentNode = currentPos;
+        altNodeSequence.push(currentNode);
+        
+        for (const trackId of routeCheck.altPath) {
+          const track = tracks[trackId];
+          if (!track) continue;
+          
+          let nextNode = null;
+          if (track.from === currentNode) {
+            nextNode = track.to;
+          } else if (track.to === currentNode) {
+            nextNode = track.from;
+          }
+          
+          if (nextNode && !altNodeSequence.includes(nextNode)) {
+            altNodeSequence.push(nextNode);
+            currentNode = nextNode;
+          }
+        }
+        
+        // Find the index of the current sensor position in the alternate node sequence
+        const currentPosIdx = altNodeSequence.indexOf(id);
+        
+        // Get all sensors that appear after the current position in the alternate path
+        sensorsAhead = altSensors.filter(sensor => {
+          const sensorIdx = altNodeSequence.indexOf(sensor);
+          return sensorIdx > currentPosIdx;
+        });
+        
+        log(`Interlocking → RBC: ⚠️ Track ${routeCheck.blockedTrack} occupied. Alternate route available`);
+        log(`🔄 Switching to alternate route due to blockage ahead`);
+        
+        // Log which sensors are ahead on the new path
+        if (sensorsAhead.length > 0) {
+          log(`📍 Next sensor on alternate route: ${sensorsAhead[0]} (${sensorsAhead.length} sensors remaining)`);
+        }
+        
+        setTimeout(() => {
+          log(`RBC → OBU: ✅⚠️ Old MA revoked. New MA Granted for alternate route`);
+          
+          // Generate new Packet 15 for alternate route from current position
+          const newPacket15 = generatePacket15ForRoute(routeCheck.altPath, `${origFrom}_${origTo}_ALT`, id);
+          currentPacket15 = newPacket15;
+          displayPacket15(newPacket15);
+          
+          log(`RBC → OBU: ETCS Packet 15 updated - ${newPacket15.N_ITER} sections from current position`);
+          
+          // Log details about the new MA
+          const totalDistance = newPacket15.sections.reduce((sum, section) => sum + section.L_SECTION, 0) + newPacket15.L_ENDSECTION;
+          log(`RBC → OBU: New MA: ${totalDistance}m total (${newPacket15.N_ITER} sections + ${newPacket15.L_ENDSECTION}m end section)`);
+        }, 500);
+        
+        // Update route with alternate path
+        dynamicTrackList = routeCheck.altPath;
+        dynamicSensorOrder = sensorsAhead; // Only sensors ahead on the new path
+        
+        // Since we're already at the current sensor and moving to next sensor
+        // We've effectively "passed" the current sensor already
+        // So we DON'T reset sensor index - we increment it after this block
+        
+        currentRoute = `${origFrom}_${origTo}_ALT_${Date.now()}`;
+        
+        // Send SCI-RBC message for route change
+        const altMsg = createRouteOccupationMessage(
+          currentRoute,
+          STANDSTILL.IN_MOVEMENT,
+          MA_STATUS.MA_ISSUED,
+          EOM_STATUS.AT_LEAST_ONE_NOT_EOM
+        );
+
+        logSciRbc(
+          `RBC → Interlocking: Msg_Route_Occupation (Route Change)
+          Protocol: ${altMsg.protocolType}
+          MsgType: ${altMsg.messageType}
+          Sender: ${altMsg.senderId}
+          Receiver: ${altMsg.receiverId}
+          RouteID: ${altMsg.routeId}
+          StandstillStatus: ${altMsg.standstillStatus}
+          MAStatus: ${getMAStatusDescription(altMsg.maStatus)}
+          EOMStatus: ${getEOMStatusDescription(altMsg.eomStatus)}`
+        );
+        
+        document.getElementById('alternateRoute').innerHTML=`<span class="alternate-route">⚠️ Using alternate route due to blockage at ${routeCheck.blockedTrack}</span>`;
+      }
+      
+      log(`OBU → RBC: Position report from ${id}`);
+      
+
+       // Send TVP Section Status message for current active section becoming vacant
+      const currentActiveTrack = document.querySelector('.track.active');
+      if (currentActiveTrack) {
+        const activeTrackId = currentActiveTrack.getAttribute('id');
+        if (trackOccupancyStatus[activeTrackId] === TVP_STATUS.OCCUPIED) {
+          trackOccupancyStatus[activeTrackId] = TVP_STATUS.VACANT;
+          sendTVPSectionStatus(activeTrackId, TVP_STATUS.VACANT);
+        }
+      }
+
+      // Send SCI-RBC message for movement
+      const movementMsg = createRouteOccupationMessage(
+        currentRoute || "UNKNOWN",
+        STANDSTILL.IN_MOVEMENT,
+        MA_STATUS.MA_ISSUED,
+        EOM_STATUS.AT_LEAST_ONE_NOT_EOM
+      );
+      
+      logSciRbc(
+        `RBC → Interlocking: Msg_Route_Occupation (Movement Update)
+        Protocol: ${movementMsg.protocolType}
+        MsgType: ${movementMsg.messageType}
+        Sender: ${movementMsg.senderId}
+        Receiver: ${movementMsg.receiverId}
+        RouteID: ${movementMsg.routeId}
+        StandstillStatus: ${movementMsg.standstillStatus}
+        MAStatus: ${getMAStatusDescription(movementMsg.maStatus)}
+        EOMStatus: ${getEOMStatusDescription(movementMsg.eomStatus)}`
+      );
+
+      // Clear all active tracks first
+      document.querySelectorAll('.track').forEach(t=>t.classList.remove('active'));
+      
+      // Update trackList to use the current (possibly rerouted) track list
+      const currentTrackList = dynamicTrackList || window.routeData[originalRouteRequest].tracks;
+      
+      // Find the next track section to activate
+      let trackToActivate = null;
+      
+      // Find current position in the track list
+      for (let i = 0; i < currentTrackList.length; i++) {
+        const track = tracks[currentTrackList[i]];
+        if (track) {
+          // Check if this sensor is at either end of this track
+          if (track.from === id || track.to === id) {
+            // Look for the next track in sequence
+            if (i + 1 < currentTrackList.length) {
+              trackToActivate = currentTrackList[i + 1];
+            }
+            break;
+          }
+        }
+      }
+      
+      // Activate the next track section
+      if (trackToActivate) {
+        const trackEl = document.getElementById(trackToActivate);
+        if (trackEl) {
+          trackEl.classList.add('active');
+           trackOccupancyStatus[trackToActivate] = TVP_STATUS.OCCUPIED;
+          sendTVPSectionStatus(trackToActivate, TVP_STATUS.OCCUPIED);
+          
+          // If it's a switch track, activate its partner too
+          Object.entries(switchGroups).forEach(([switchName, trackIds]) => {
+            if (trackIds.includes(trackToActivate)) {
+              trackIds.forEach(tid => {
+                const tel = document.getElementById(tid);
+                 if (tel && tid !== trackToActivate) {
+                  tel.classList.add('active');
+                  trackOccupancyStatus[tid] = TVP_STATUS.OCCUPIED;
+                  sendTVPSectionStatus(tid, TVP_STATUS.OCCUPIED);
+                 }
+              });
+            }
+          });
+        }
+      }
+      
+      // Only increment sensor index if we didn't just reroute
+      if (!routeCheck.needsReroute) {
+        currentSensorIdx++;
+      } else {
+        // If we rerouted, currentSensorIdx should be 0 for the new sensor order
+        currentSensorIdx = 0;
+      }
+      
+      // Update order to use current sensor order
+      const currentOrder = dynamicSensorOrder || window.routeData[originalRouteRequest].sensors;
+      
+      if(currentSensorIdx >= currentOrder.length){ 
+        setTimeout(()=>{
+          log(`✅ Route ${currentRoute} completed.`);
+
+          // Clear the last active section's occupancy
+          document.querySelectorAll('.track.active').forEach(t => {
+            const trackId = t.getAttribute('id');
+            if (trackOccupancyStatus[trackId] === TVP_STATUS.OCCUPIED) {
+              trackOccupancyStatus[trackId] = TVP_STATUS.VACANT;
+              sendTVPSectionStatus(trackId, TVP_STATUS.VACANT);
+            }
+          });
+          
+          // Send EOM message
+          const eomMsg = createRouteOccupationMessage(
+            currentRoute || "UNKNOWN",
+            STANDSTILL.AT_STANDSTILL,
+            MA_STATUS.NO_MA_ISSUED,
+            EOM_STATUS.ALL_TRAINS_EOM
+          );
+          
+          logSciRbc(
+            `RBC → Interlocking: Msg_Route_Occupation (EOM)
+            Protocol: ${eomMsg.protocolType}
+            MsgType: ${eomMsg.messageType}
+            Sender: ${eomMsg.senderId}
+            Receiver: ${eomMsg.receiverId}
+            RouteID: ${eomMsg.routeId}
+            StandstillStatus: ${eomMsg.standstillStatus}
+            MAStatus: ${getMAStatusDescription(eomMsg.maStatus)}
+            EOMStatus: ${getEOMStatusDescription(eomMsg.eomStatus)}`
+          );
+          
+          // Clear Packet 15 display
+          displayPacket15(null);
+          currentPacket15 = null;
+        },500); 
+        
+        movementAuthorityGranted = false; 
+        
+        originalRouteRequest = "";
+        dynamicTrackList = null;
+        dynamicSensorOrder = null;
+      }
+    }
+
+    function log(msg){ 
+      const tb=document.getElementById('logTable'),tr=document.createElement('tr'),td1=document.createElement('td'),td2=document.createElement('td'); 
+      td1.textContent=new Date().toLocaleTimeString(); 
+      td2.textContent=msg; 
+      tr.append(td1,td2); 
+      tb.appendChild(tr); 
+      tb.scrollTop=tb.scrollHeight; 
+    }
+
+    document.getElementById('routeSelect').addEventListener('change',e=>{ 
+      window.currentRoute = e.target.value;  // ✅ Global
+originalRouteRequest = window.currentRoute;
+
+      originalRouteRequest = currentRoute;
+      currentSensorIdx = 0; 
+      movementAuthorityGranted = false; 
+      dynamicTrackList = null; 
+      dynamicSensorOrder = null; 
+      currentPacket15 = null;
+      displayPacket15(null);
+
+       // Clear all active tracks and send TVP vacant messages
+         document.querySelectorAll('.track.active').forEach(t => {
+        const trackId = t.getAttribute('id');
+        t.classList.remove('active');
+        if (trackOccupancyStatus[trackId] !== TVP_STATUS.VACANT) {
+          trackOccupancyStatus[trackId] = TVP_STATUS.VACANT;
+          sendTVPSectionStatus(trackId, TVP_STATUS.VACANT);
+        }
+      });
+      
+      // Activate the first track section when route is selected
+      if (currentRoute && window.routeData && window.routeData[currentRoute]) {
+        const firstTrack = window.routeData[currentRoute].tracks[0];
+        if (firstTrack) {
+          const firstTrackEl = document.getElementById(firstTrack);
+          if (firstTrackEl) {
+            firstTrackEl.classList.add('active');
+            trackOccupancyStatus[firstTrack] = TVP_STATUS.OCCUPIED;
+            sendTVPSectionStatus(firstTrack, TVP_STATUS.OCCUPIED);
+            
+            // If it's a switch track, activate its partner too
+            Object.entries(switchGroups).forEach(([switchName, trackIds]) => {
+              if (trackIds.includes(firstTrack)) {
+                trackIds.forEach(tid => {
+                  const tel = document.getElementById(tid);
+                   if (tel && tid !== firstTrack) {
+                  tel.classList.add('active');
+                   trackOccupancyStatus[tid] = TVP_STATUS.OCCUPIED;
+                    sendTVPSectionStatus(tid, TVP_STATUS.OCCUPIED);
+                   }
+                });
+              }
+            });
+            
+            log(`🚂 Train positioned at start of route - Section ${firstTrack} active`);
+          }
+        }
+      }
+      
+      document.getElementById('currentRoute').textContent = `Current Route: ${window.currentRoute}`;
+
+      document.getElementById('alternateRoute').textContent = ''; 
+    });
+
+    document.getElementById('occupiedSelect').onchange=e=>{ 
+      const [act, target] = e.target.value.split('_'); 
+      
+      if (act === 'occupy') {
+        if (switchGroups[target]) {
+          // It's a switch
+          setSwitchOccupancy(target, true);
+          log(`⚠️ Switch ${target} Occupied`);
+        } else if (target) {
+          // It's a regular track
+          const trackEl = document.getElementById(target);
+          if (trackEl && !trackEl.classList.contains('occupied')) {
+            trackEl.classList.add('occupied');
+            trackOccupancyStatus[target] = TVP_STATUS.OCCUPIED;
+            sendTVPSectionStatus(target, TVP_STATUS.OCCUPIED);
+          log(`⚠️ ${target} Occupied`);
+          }
+        }
+      } else if (act === 'free') {
+        if (target === 'all') {
+          // Free all tracks
+          document.querySelectorAll('.track').forEach(t => {
+              if (t.classList.contains('occupied')) {
+              t.classList.remove('occupied');
+              const trackId = t.getAttribute('id');
+              if (trackOccupancyStatus[trackId] === TVP_STATUS.OCCUPIED) {
+                trackOccupancyStatus[trackId] = TVP_STATUS.VACANT;
+                sendTVPSectionStatus(trackId, TVP_STATUS.VACANT);
+              }
+            }
+          });
+           log(`✅ All tracks freed`);
+        } else if (switchGroups[target]) {
+          // It's a switch
+          setSwitchOccupancy(target, false);
+          log(`✅ Switch ${target} Freed`);
+        } else if (target) {
+          // It's a regular track
+           const trackEl = document.getElementById(target);
+          if (trackEl && trackEl.classList.contains('occupied')) {
+            trackEl.classList.remove('occupied');
+            trackOccupancyStatus[target] = TVP_STATUS.VACANT;
+            sendTVPSectionStatus(target, TVP_STATUS.VACANT);
+          log(`✅ ${target} Freed`);
+          }
+        }
+      }
+      
+      e.target.value = ''; 
+    };
+
+    function renderSvg(){
+      const svg=document.getElementById('topologySVG');
+      svg.innerHTML=`<defs><pattern id="redYellowStripes" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(45)"><rect width="4" height="8" fill="red"/><rect x="4" width="4" height="8" fill="yellow"/></pattern></defs>`;
+      const wrapper = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      wrapper.setAttribute('transform', 'scale(2)');
+      // Render station labels with enhanced info
+      Object.values(stations).forEach(station => {
+        const txt=document.createElementNS('http://www.w3.org/2000/svg','text'); 
+        txt.setAttribute('x',station.x); 
+        txt.setAttribute('y',station.y-15); 
+        txt.classList.add('station-label'); 
+        txt.textContent=station.name || station.id; 
+        svg.appendChild(txt); 
+        
+        // Add station type below if specified
+        if(station.type && station.type !== 'unknown') {
+          const typeTxt=document.createElementNS('http://www.w3.org/2000/svg','text'); 
+          typeTxt.setAttribute('x',station.x); 
+          typeTxt.setAttribute('y',station.y-3); 
+          typeTxt.classList.add('station-info'); 
+          typeTxt.textContent=`(${station.type})`; 
+          svg.appendChild(typeTxt); 
+        }
+      });
+      
+      // Render tracks using coordinates
+      Object.values(tracks).forEach(t => {
+        const ln=document.createElementNS('http://www.w3.org/2000/svg','line'); 
+        ln.setAttribute('x1',t.x1); 
+        ln.setAttribute('y1',t.y1); 
+        ln.setAttribute('x2',t.x2); 
+        ln.setAttribute('y2',t.y2); 
+        ln.setAttribute('id',t.id); 
+        ln.classList.add('track'); 
+        svg.appendChild(ln);
+        
+        // Check if this track is part of a switch
+        let isPartOfSwitch = false;
+        Object.values(switchGroups).forEach(trackList => {
+          if (trackList.includes(t.id)) isPartOfSwitch = true;
+        });
+        
+        // Only label non-switch tracks
+        if (!isPartOfSwitch) {
+          const midX=(t.x1+t.x2)/2, midY=(t.y1+t.y2)/2;
+          const lbl=document.createElementNS('http://www.w3.org/2000/svg','text'); 
+          lbl.setAttribute('x',midX+9); 
+          lbl.setAttribute('y',midY-4); 
+          lbl.classList.add('label'); 
+          lbl.textContent=t.id; 
+          svg.appendChild(lbl);
+        }
+      });
+      
+      // Render sensors at their positions
+      Object.values(sensors).forEach(s => {
+        const c=document.createElementNS('http://www.w3.org/2000/svg','circle'); 
+        c.setAttribute('cx', s.x); 
+        c.setAttribute('cy', s.y); 
+        c.setAttribute('r', 6); 
+        c.setAttribute('id', `sensor_${s.id}`); 
+        c.classList.add('sensor'); 
+        c.addEventListener('click', () => handleSensorClick(s.id)); 
+        svg.appendChild(c);
+        
+        // Add sensor label
+        const lbl=document.createElementNS('http://www.w3.org/2000/svg','text'); 
+        lbl.setAttribute('x', s.x - 5); 
+        lbl.setAttribute('y', s.y - 10); 
+        lbl.classList.add('sensor-label'); 
+        lbl.textContent = s.id; 
+        svg.appendChild(lbl);
+      });
+    }
+  </script>
+
+<script type="module">
+  import { MQTTManager } from './modules/mqtt.js';
+  import { ETCSManager } from './modules/etcs.js';
+  import { Logger } from './modules/logger.js';
+  import { createRBCHandlers } from './modules/etcs_rbc.js';
+
+const RBC_ID = "DE0001";
+const BROKER_URL = "ws://192.168.4.4:9001";
+const BROKER_URL_AI   = "ws://192.168.4.4:9003";
+
+const output = document.getElementById("etcsLogContent") || document.body;
+const logger = new Logger(output);
+
+let etcsManager;
+let mqttClient;
+let mqttAi;
+
+const TOPIC = {
+  obuHS: `obu/${RBC_ID}/handshake`,
+  rbcHS: `rbc/${RBC_ID}/handshake`,
+  rbcIn: `rbc/${RBC_ID}/in`,
+  rbcOut: `rbc/${RBC_ID}/out`,
+  obuAI: `obu/DE0001/ai/alert`
+};
+
+// ---- META NORMALIZER (PATCH) ----
+function mergeMetaIntoTop(msg) {
+  if (!msg || typeof msg !== "object") return msg;
+
+  // Common places meta might live
+  const meta =
+    (msg.meta && typeof msg.meta === "object" && msg.meta) ||
+    (msg._meta && typeof msg._meta === "object" && msg._meta) ||
+    (msg.kpi  && typeof msg.kpi  === "object" && msg.kpi)  ||
+    null;
+
+  if (meta) {
+    for (const [k, v] of Object.entries(meta)) {
+      if (msg[k] === undefined) msg[k] = v;
+    }
+  }
+
+  // Alias common naming mismatches → what etcs_rbc.js expects
+  // (so handleMessage136 can read them)
+  if (msg.t_obu_recv_ms === undefined && msg.tObuRecvMs !== undefined) msg.t_obu_recv_ms = msg.tObuRecvMs;
+  if (msg.t_obu_send_ms === undefined && msg.tObuSendMs !== undefined) msg.t_obu_send_ms = msg.tObuSendMs;
+
+  // ESP32 fields (if you ever forward them)
+// Only treat these as ESP fields if you explicitly receive ESP meta keys
+  if (msg.t_esp_sense_ms === undefined && msg.tEspSenseMs !== undefined) msg.t_esp_sense_ms = msg.tEspSenseMs;
+  if (msg.t_esp_send_ms  === undefined && msg.tEspSendMs  !== undefined) msg.t_esp_send_ms  = msg.tEspSendMs;
+
+
+  return msg;
+}
+
+
+async function initialize() {
+  const response = await fetch("messages.json");
+  const messages = await response.json();
+
+  etcsManager = new ETCSManager(messages);
+
+  mqttClient = new MQTTManager(BROKER_URL, `RBC-${RBC_ID}`);
+
+  mqttAi   = new MQTTManager(BROKER_URL_AI,   `RBC-${RBC_ID}-AI`);
+
+  // ✅ Setup dummy topology so handlers work BEFORE any XML is uploaded
+  const emptyTopology = {
+    tracks: {}, stations: {}, sensors: {}, switches: {}, routeData: {}
+  };
+  window.handlers = createRBCHandlers(etcsManager, mqttClient, mqttAi, logger, TOPIC, updateStatus, emptyTopology);
+
+  mqttClient.on("connect", () => {
+    logger.info("Connected to MQTT broker");
+    mqttClient.subscribe([TOPIC.obuHS, TOPIC.rbcIn], { qos: 2 });
+    mqttClient.subscribe(`kpi/${RBC_ID}/pos`, { qos: 1 });
+    etcsManager.stateManager.reset();
+    etcsManager.stateManager.transition('CONNECTED');
+  });
+
+  mqttAi.on("connect", () => {
+  logger.info("Connected AI MQTT");
+  mqttAi.subscribe([TOPIC.obuAI], { qos: 2 });
+});
+mqttAi.on("message", (topic, payload) => {
+  if (topic !== TOPIC.obuAI) return;
+  let msg = JSON.parse(payload.toString());
+  msg = mergeMetaIntoTop(msg);
+  msg.t_ui_recv_ms = Date.now();
+  window.handlers?.handleAIAlerts(msg);
+});
+
+
+mqttClient.on("message", (topic, payload) => {
+  try {
+    let msg = JSON.parse(payload.toString());
+
+    // ✅ flatten any nested meta into top-level fields
+    msg = mergeMetaIntoTop(msg);
+
+    // ✅ stamp RBC receive time (RBC local clock)
+    // UI-only timestamp (avoid mixing with KPI naming)
+    msg.t_ui_recv_ms = Date.now();
+
+    
+    if (topic === TOPIC.obuHS && msg.type === "AU1") {
+      log('AU1 received');
+      //window.handlers?.handleAU1Message(msg);
+
+      if (!window.handlers) {
+  log("❌ window.handlers missing when AU1 arrived");
+} else if (typeof window.handlers.handleAU1Message !== "function") {
+  log("❌ handlers.handleAU1Message missing or not a function", window.handlers);
+} else {
+  log("✅ calling handleAU1Message");
+  window.handlers.handleAU1Message(msg);
+}
+
+      log('After etcs_rbc');
+    } 
+	else if (topic === TOPIC.rbcIn) {
+      window.handlers?.handleETCSMessage(msg);
+
+      // ✅ Set movementAuthorityGranted when MA is received
+      if (msg.NID_MESSAGE === 3 && msg.packet15) {
+        movementAuthorityGranted = true;
+        currentPacket15 = msg.packet15;
+        log(`✅ Movement Authority granted!`);
+        displayPacket15(currentPacket15);
+      }
+    }
+	else if (topic === TOPIC.obuAI){
+		window.handlers?.handleAIAlerts(msg);
+	}
+  else if (topic === `kpi/${RBC_ID}/pos`) {
+  // msg = mergeMetaIntoTop(msg) already done above
+  // expected fields: sensor_id, sensor_seq, t_obu_recv_ms, t_obu_send_ms, etc.
+  // You can log or store it, e.g.:
+  log(`📍 KPI POS sensor=${msg.sensor_id} seq=${msg.sensor_seq} obu_send=${msg.t_obu_send_ms} rbc_recv=${msg.t_recv_ms}`);
+  return;
+}
+
+
+  } catch (e) {
+    logger.error("Failed to parse ETCS message: " + e.message);
+    console.error(e);
+  }
+});
+
+
+}
+
+
+  function updateStatus() {
+    // Status update function if needed
+  }
+
+  // ✅ Moved from above into here:
+  document.getElementById('configUpload').addEventListener('change', e => {
+    const file = e.target.files[0];
+    const rdr = new FileReader();
+
+    rdr.onload = ev => {
+      parseConfig(ev.target.result);
+      buildTrackConnections();
+      renderSvg();
+      computeRoutes();
+      updateOccupancyControls();
+      window.tracks = tracks;
+window.stations = stations;
+window.sensors = sensors;
+window.switches = switches;
+window.routeData = routeData; 
+      const topology = {
+        tracks: window.tracks,
+        stations: window.stations,
+        sensors: window.sensors,
+        switches: window.switches,
+        routeData: window.routeData
+      };
+
+      window.handlers = createRBCHandlers(etcsManager, mqttClient, mqttAi, logger, TOPIC, updateStatus, topology);
+    };
+
+    rdr.readAsText(file);
+  });
+
+  window.addEventListener("beforeunload", () => {
+    if (mqttClient) mqttClient.end();
+  });
+
+  initialize();
+</script>
+
+</body>
+</html>

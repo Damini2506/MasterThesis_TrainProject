@@ -1,0 +1,1504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Remote OBU Monitor</title>
+  <script src="./libs/mqtt.min.js"></script>
+
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 2rem;
+      line-height: 1.4;
+      background-color: #000;
+      color: #f0f0f0;
+    }
+
+    label { display:block; margin:.25rem 0; font-weight:600; color:#ddd; }
+
+    input, button {
+      padding: .5rem;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+
+    input {
+      width: 100%;
+      max-width: 420px;
+      border: 1px solid #555;
+      background-color: #111;
+      color: #fff;
+    }
+
+    button {
+      margin-top: .5rem;
+      background: #1a73e8;
+      color: #fff;
+      border: none;
+      cursor: pointer;
+    }
+
+    button:disabled { opacity:.6; cursor:not-allowed; }
+
+    .row { margin-top: 0.75rem; }
+
+    .circle {
+      display:inline-block; width:10px; height:10px; border-radius:50%;
+      margin-right:.5rem; background:red;
+    }
+
+    .pill {
+      display:inline-block;
+      padding:.15rem .5rem;
+      border:1px solid #444;
+      border-radius:999px;
+      margin-left:.5rem;
+      font-size:.85rem;
+      color:#bbb;
+    }
+
+    /* --- Layout for center camera + right log --- */
+    #mainLayout {
+      display: flex;
+      gap: 1rem;
+      margin-top: 1.25rem;
+      align-items: flex-start;
+    }
+
+    #centerPanel {
+      flex: 1;
+      min-width: 300px;
+    }
+
+    #rightPanel {
+      width: 360px;
+      max-width: 40vw;
+    }
+
+    #cameraBox {
+      background: #fff;
+      border-radius: 8px;
+      height: 420px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      color: #000;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      position: relative;
+    }
+
+    #camImg{
+      width: 100%;
+      height: 100%;
+      object-fit: contain; /* keeps aspect ratio */
+      display: block;
+      background: #fff;
+    }
+
+    #camOverlay {
+      position: absolute;
+      left: 10px;
+      top: 10px;
+      background: rgba(0,0,0,0.55);
+      color: #fff;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      display: none;
+    }
+
+    #log {
+      margin-top: 0.5rem;
+      height: 420px;
+      overflow: auto;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 10px;
+      background: #070707;
+      color: #eaeaea;
+      white-space: pre-wrap;
+    }
+
+    /* --- Alert banner (blinking red) --- */
+    #alertBanner{
+      position: fixed;
+      top: 110px;
+      right: 40px;
+      width: 520px;
+      max-width: 40vw;
+      padding: 14px 16px;
+      border-radius: 12px;
+      background: #b00020;
+      color: white;
+      box-shadow: 0 0 18px rgba(255,0,0,0.35);
+      z-index: 9999;
+      border: 1px solid rgba(255,255,255,0.15);
+    }
+
+    #alertBanner .alertTitle{
+      font-weight: 800;
+      letter-spacing: .5px;
+      margin-bottom: 6px;
+      font-size: 15px;
+    }
+
+    #alertText{
+      font-size: 14px;
+      line-height: 1.25;
+      word-break: break-word;
+    }
+
+    #alertAckBtn{
+      margin-top: 10px;
+      background: #111;
+      border: 1px solid rgba(255,255,255,0.25);
+      color: #fff;
+      padding: .5rem .8rem;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .alertHidden{ display: none; }
+
+    @keyframes blinkRed {
+      0%   { opacity: 1; }
+      50%  { opacity: .25; }
+      100% { opacity: 1; }
+    }
+
+    .alertBlink{
+      animation: blinkRed 0.8s infinite;
+    }
+
+      /* --- QoS panel --- */
+  #qosBox{
+    margin-top: 0.75rem;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 10px;
+    background: #0b0b0b;
+  }
+
+  #qosBox h3{
+    margin: 0 0 8px 0;
+    font-size: 14px;
+    color: #cfcfcf;
+  }
+
+  .qosGrid{
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .qosRow{
+    background: #070707;
+    border: 1px solid #222;
+    border-radius: 8px;
+    padding: 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 12px;
+    line-height: 1.25;
+  }
+
+  .qosKey{ color:#9ad; }
+  .qosVal{ color:#fff; }
+  .qosWarn{ color:#ffb300; }
+  .qosBad{ color:#ff5252; }
+
+  </style>
+</head>
+
+<body>
+  <h1>Remote OBU Monitor</h1>
+
+  <!-- Blinking alert area (top-right) -->
+  <div id="alertBanner" class="alertHidden">
+    <div class="alertTitle">⚠️ OBSTACLE ALERT</div>
+    <div id="alertText">No active alerts</div>
+    <button id="alertAckBtn">Acknowledge</button>
+  </div>
+
+  <div class="row">
+    <span class="circle" id="brokerCircle"></span>
+    <span id="brokerText">Not connected</span>
+    <span class="pill" id="subText">No subscriptions</span>
+  </div>
+
+  <div class="row">
+    <label for="brokerUrl">Broker WS URL</label>
+    <input id="brokerUrl" type="text" value="ws://192.168.4.4:9001/mqtt" />
+
+    <label for="trainNo">Train Number</label>
+    <input id="trainNo" type="text" placeholder="TRAIN01" value="TRAIN01" />
+    <button id="trainConnectBtn" style="margin-top:.5rem; background:#00a86b;">Connect Train</button>
+    <span class="pill" id="trainText">Train: not connected</span>
+
+    <label for="rbcId">RBC ID</label>
+    <input id="rbcId" type="text" placeholder="DE0001" value="DE0001" />
+
+    <button id="connectBtn">Connect</button>
+    <button id="disconnectBtn" style="margin-left:.5rem; background:#555;" disabled>Disconnect</button>
+    <button id="clearBtn" style="margin-left:.5rem; background:#333;">Clear Log</button>
+    <button id="downloadKpiBtn" style="background:#444;">Download KPI Log</button>
+
+  </div>
+
+  <div class="row">
+    <button id="startBtn" disabled>Start Train</button>
+    <button id="stopBtn" disabled style="margin-left:.5rem; background:#ff5722;">Stop Train</button>
+
+    <!-- ✅ Manual capture button (enabled as soon as camera subscription succeeds) -->
+    <button id="capFrameBtn" disabled style="margin-left:.5rem; background:#8e44ad;">
+      Capture Frames
+    </button>
+    <span class="pill" id="capInfo">0 saved</span>
+  </div>
+
+  <div id="mainLayout">
+    <div id="centerPanel">
+      <h2>Live Camera</h2>
+      <div id="cameraBox">
+        <img id="camImg" alt="Live Camera"  style="width:1200px; height: auto; object-fit: contain;"/>
+        <div id="camOverlay">No camera frames yet</div>
+      </div>
+    </div>
+
+    <div id="rightPanel">
+      <h2>Packet Monitor</h2>
+      <pre id="log"></pre>
+      <div id="qosBox">
+        <h3>QoS / Timing</h3>
+        <div class="qosGrid">
+          <div class="qosRow" id="qosAi">AI: waiting…</div>
+          <div class="qosRow" id="qosVideo">Video: waiting…</div>
+          <div class="qosRow" id="qosEtcs">ETCS: waiting…</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+
+  <script type="module">
+  import { makeJsonlLogger } from "./modules/json_logger.js";
+  const kpi = makeJsonlLogger({ nodeName: "REMOTE_OBU", dir: "./logs" });
+  window.kpiLogRemote = kpi;
+  console.log("REMOTE KPI LOG:", kpi.file);
+</script>
+
+  <script>
+    const kpiSafe = window.kpiLogRemote || { log: () => {}, download: () => {} };
+    window.kpi = kpiSafe;
+
+
+    
+    /***************
+     * SETTINGS
+     ***************/
+    const TRAIN_FIXED = "TRAIN01";
+    const CAM_TOPIC = "obu/cam/jpeg";
+    const LOCAL_AI_ALERT_TOPIC = "obu/ai/alert";
+    const CAM_META_TOPIC = "obu/cam/meta";
+    const AI_ACK_TOPIC = "obu/ai/ack";
+    const QOS_TOPIC = `obu/${TRAIN_FIXED}/qos`;
+    const TRAIN_CMD_META_TOPIC = "obu/train/meta"; // shadow command for OBU observation
+
+
+    const topicCmd    = (trainNo) => `obu/${trainNo}/cmd`;
+    const topicStatus = (trainNo) => `obu/${trainNo}/status`;
+
+    /***************
+     * DOM REFS
+     ***************/
+    const logEl = document.getElementById("log");
+    const brokerCircle = document.getElementById("brokerCircle");
+    const brokerText = document.getElementById("brokerText");
+    const subText = document.getElementById("subText");
+
+    const connectBtn = document.getElementById("connectBtn");
+    const disconnectBtn = document.getElementById("disconnectBtn");
+    const clearBtn = document.getElementById("clearBtn");
+
+    const startBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+
+    const trainConnectBtn = document.getElementById("trainConnectBtn");
+    const trainText = document.getElementById("trainText");
+
+    const camImg = document.getElementById("camImg");
+    const camOverlay = document.getElementById("camOverlay");
+
+    const alertBanner = document.getElementById("alertBanner");
+    const alertText = document.getElementById("alertText");
+    const alertAckBtn = document.getElementById("alertAckBtn");
+
+    const capFrameBtn = document.getElementById("capFrameBtn");
+    const capInfo = document.getElementById("capInfo");
+
+    // ---- QoS state ----
+    const qosAiEl = document.getElementById("qosAi");
+    const qosVideoEl = document.getElementById("qosVideo");
+    const qosEtcsEl = document.getElementById("qosEtcs");
+
+    // Video meta stats
+    let lastMeta = null;
+    let lastMetaRecvMs = 0;
+    let lastFrameId = null;
+    let videoJitterEwma = null;
+    let videoLatencyEwma = null;
+    let videoDrops = 0;
+
+    const VIDEO_PING_TOPIC = "obu/video/ping";
+    const VIDEO_PONG_TOPIC = "obu/video/pong";
+
+    const pendingVideoPing = new Map(); // frame_id -> t0 (Remote clock)
+    let videoPingEveryN = 10;           // sample every 10th frame (change if needed)
+        
+
+    // AI stats
+    let aiLast = null;
+    let aiLatencyEwma = null;
+    let aiNetworkEwma = null;
+    let aiInferEwma = null;
+
+    // Simple EWMA helper
+    const ewma = (prev, x, a=0.15) => (prev == null ? x : (1-a)*prev + a*x);
+
+    // Manual Start/Stop KPI correlation
+    const pendingTrainCmdTs = new Map(); // cmd_id -> t_send_ms (Remote clock)
+
+
+// ===== KPI LOG (safe, side-effect free) =====
+// NOTE: We log to BOTH:
+//  1) in-memory KPI_ROWS (old behavior, harmless)
+//  2) json_logger.js via window.kpi.log(...) so Download KPI Log includes everything
+const KPI_ROWS = [];
+const kpiLog = (row) => {
+  try {
+    const full = { ts_iso: new Date().toISOString(), ...row };
+
+    // 1) Keep your existing in-memory buffer
+    KPI_ROWS.push(full);
+    if (KPI_ROWS.length > 20000) KPI_ROWS.shift();
+
+    // 2) Also write to the real JSONL logger (downloadKpiBtn uses this)
+    try { window.kpi?.log?.(full); } catch (_) {}
+  } catch (_) {}
+};
+
+
+// Call from DevTools console: downloadKpi()
+window.downloadKpi = () => {
+  try {
+    const jsonl = KPI_ROWS.map(r => JSON.stringify(r)).join("\n") + "\n";
+    const blob = new Blob([jsonl], { type: "application/jsonl" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `kpi_REMOTE_OBU_${new Date().toISOString().replace(/[:.]/g,"-")}.jsonl`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (_) {}
+};
+
+
+
+    /***************
+     * STATE
+     ***************/
+    let clientCtrl = null;
+    let clientVideo = null;
+    let clientAI = null;
+
+    let subscribedTopics = [];
+
+    let trainConnected = false;
+    const mediaGateOpen = () => (trainConnected === true);
+
+    let trainStatus = { launcher:false, stack:false, camera:false, hailo:false };
+
+    let lastCamUrl = null;
+    let lastCamTs = 0;
+
+    let alertClearTimer = null;
+
+    // ---- MA gating state ----
+    let currentRbcId = null;
+    let maReceived = false;
+
+    // ---- Dataset capture UI ----
+    let savedCount = 0;
+
+    /***************
+     * UTIL
+     ***************/
+    const log = (...args) => {
+      const ts = new Date().toLocaleTimeString();
+      const line = args.map(a => (typeof a === "string" ? a : JSON.stringify(a, null, 2))).join(" ");
+      logEl.textContent += `[${ts}] ${line}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+    };
+
+    const setBrokerStatus = (state, label) => {
+      brokerCircle.style.backgroundColor =
+        state === "connected" ? "limegreen" :
+        state === "connecting" ? "orange" :
+        "red";
+      brokerText.textContent = label;
+    };
+
+    const setTrainUi = (label, ok = false) => {
+      trainText.textContent = label;
+      trainText.style.borderColor = ok ? "#2ecc71" : "#444";
+      trainText.style.color = ok ? "#a8ffb8" : "#bbb";
+    };
+
+    const prettyMsgLabel = (msg) => {
+      if (msg && typeof msg === "object") {
+        if (msg.NID_MESSAGE !== undefined) return `Message ${msg.NID_MESSAGE}`;
+        if (msg.type) return `Type ${msg.type}`;
+      }
+      return "Unknown";
+    };
+
+    // ---- MA detector (YOUR SIM: NID_MESSAGE = 3) ----
+    const isMovementAuthority = (msg) => {
+      if (!msg || typeof msg !== "object") return false;
+      if (msg.NID_MESSAGE === 3) return true;
+      const t = (msg.type || msg.name || msg.msgType || "").toString().toLowerCase();
+      if (t.includes("movement") && t.includes("authority")) return true;
+      if (t === "ma") return true;
+      return false;
+    };
+
+    const showAlert = (text) => {
+      alertText.textContent = text;
+      alertBanner.classList.remove("alertHidden");
+      alertBanner.classList.add("alertBlink");
+
+      clearTimeout(alertClearTimer);
+      alertClearTimer = setTimeout(() => {
+        alertBanner.classList.add("alertHidden");
+        alertBanner.classList.remove("alertBlink");
+      }, 8000);
+    };
+
+    alertAckBtn.addEventListener("click", () => {
+      alertBanner.classList.add("alertHidden");
+      alertBanner.classList.remove("alertBlink");
+    });
+
+    clearBtn.addEventListener("click", () => { logEl.textContent = ""; });
+
+    /***************
+     * SUBSCRIBE RBC TOPICS (ETCS)
+     ***************/
+    const subscribeToRbc = (rbcId) => {
+      const topics = [
+        `obu/${rbcId}/handshake`,
+        `rbc/${rbcId}/handshake`,
+        `rbc/${rbcId}/in`,
+        `rbc/${rbcId}/out`,
+        `obu/${rbcId}/keys`
+        //`obu/${rbcId}/ai/alert`
+      ];
+      //clientVideo.subscribe([CAM_TOPIC, CAM_META_TOPIC], { qos: 0 });
+
+      //clientCtrl.subscribe([QOS_TOPIC], { qos: 1 });
+      clientCtrl.subscribe([TRAIN_CMD_META_TOPIC, topicStatus(TRAIN_FIXED)], { qos: 1 });
+      clientAI?.subscribe([QOS_TOPIC], { qos: 0 });
+
+
+      clientCtrl.subscribe(topics, { qos: 2 }, (err) => {
+        if (err) {
+          log("❌ Subscribe failed:", err.message || err);
+          return;
+        }
+        subscribedTopics = Array.from(new Set([...subscribedTopics, ...topics]));
+        subText.textContent = `Subscribed: ${subscribedTopics.length} topics`;
+        log("✅ Subscribed to topics:", topics);
+      });
+
+      //clientAI.subscribe([LOCAL_AI_ALERT_TOPIC, `obu/${rbcId}/ai/alert`], { qos: 0 });
+      //clientAI.subscribe([AI_ACK_TOPIC], { qos: 1 });
+      //clientAI.subscribe([QOS_TOPIC], { qos: 0 });
+
+
+
+    };
+
+    /***************
+     * DISCONNECT
+     ***************/
+    const disconnect = () => {
+      try { clientCtrl?.end(true); } catch (_) {}
+      try { clientVideo?.end(true); } catch (_) {}
+      try { clientAI?.end(true); } catch (_) {}
+      
+      clientAI = null;
+      clientCtrl = null;
+      clientVideo = null;
+
+      subscribedTopics = [];
+      subText.textContent = "No subscriptions";
+      setBrokerStatus("disconnected", "Not connected");
+      disconnectBtn.disabled = true;
+
+      startBtn.disabled = true;
+      stopBtn.disabled = true;
+
+      setTrainUi("Train: not connected", false);
+
+      currentRbcId = null;
+      maReceived = false;
+
+      capFrameBtn.disabled = true;
+      savedCount = 0;
+      capInfo.textContent = "0 saved";
+
+      log("🔌 Disconnected");
+    };
+
+    disconnectBtn.addEventListener("click", disconnect);
+
+    /***************
+     * CONNECT BROKER (AUTO ON PAGE LOAD)
+     ***************/
+    const connectBroker = () => {
+      const brokerUrl = document.getElementById("brokerUrl").value.trim();
+      if (!brokerUrl) return alert("Enter broker URL");
+
+      if (clientCtrl) disconnect();
+
+      setBrokerStatus("connecting", "Connecting...");
+      log("Connecting to broker:", brokerUrl);
+
+      // Control plane (ETCS, AI, status)
+      clientCtrl = mqtt.connect(brokerUrl, {
+        clientId: "REMOTE_OBU_CTRL_" + Math.random().toString(16).slice(2),
+        clean: true,
+        reconnectPeriod: 1000
+      });
+
+      // Video plane (camera only)
+      clientVideo = mqtt.connect(
+        brokerUrl.replace("9001", "9002"),   // 👈 important
+        {
+          clientId: "REMOTE_OBU_VIDEO_" + Math.random().toString(16).slice(2),
+          clean: true,
+          reconnectPeriod: 1000
+        }
+      );
+      
+      //AI Alerts
+      clientAI = mqtt.connect(
+        brokerUrl.replace("9001", "9003"),
+        {
+          clientId: "REMOTE_OBU_AI_" + Math.random().toString(16).slice(2),
+          clean: true,
+          reconnectPeriod: 1000
+        }
+      );
+
+clientAI.on("connect", () => {
+  log("✅ Connected to broker (AI)");
+  /*if (!mediaGateOpen()) {
+    log("⛔ AI: not subscribing yet (train not connected)");
+    return;
+  }*/
+  clientAI.subscribe([LOCAL_AI_ALERT_TOPIC,AI_ACK_TOPIC], { qos: 1 }, (err) => {
+    if (err) log("❌ AI subscribe failed:", err.message || err);
+    else log("🔁 AI subscribed (on connect):", [LOCAL_AI_ALERT_TOPIC]);
+  });
+  clientAI.subscribe([QOS_TOPIC], { qos: 1 }, (err) => {
+  if (err) log("❌ QoS subscribe (AI) failed:", err.message || err);
+  else log("✅ QoS subscribed (AI):", [QOS_TOPIC]);
+});
+
+
+});
+
+
+
+      clientAI.on("close", () => log("⚠️ MQTT AI socket closed"));
+      clientAI.on("offline", () => log("⚠️ MQTT AI offline"));
+      clientAI.on("reconnect", () => log("🔄 MQTT AI reconnecting..."));
+      clientAI.on("error", (err) => log("❌ MQTT AI error:", err.message || err));
+
+
+
+      clientCtrl.on("connect", () => {
+        setBrokerStatus("connected", "Connected to broker");
+        disconnectBtn.disabled = false;
+
+        startBtn.disabled = true;
+        stopBtn.disabled = true;
+
+        log("✅ Connected to broker (CTRL)");
+
+          clientCtrl.subscribe([VIDEO_PONG_TOPIC], { qos: 0 }, (err) => {
+           if (err) log("❌ Re-subscribe failed:", err.message || err);
+           else log("✅ Re-subscribed:", [VIDEO_PONG_TOPIC]);
+          });
+
+          /*
+          clientCtrl.subscribe([QOS_TOPIC], { qos: 1 }, (err) => {
+            if (err) log("❌ QoS subscribe (CTRL) failed:", err.message || err);
+            else log("✅ QoS subscribed (CTRL):", [QOS_TOPIC]);
+          });*/
+
+
+        
+      });
+
+      clientCtrl.on("reconnect", () => setBrokerStatus("connecting", "Reconnecting..."));
+      clientCtrl.on("error", (err) => {
+        log("❌ MQTT CTRL error:", err.message || err);
+        setBrokerStatus("disconnected", "Error");
+      });
+      clientCtrl.on("close", () => {
+        log("⚠️ MQTT CTRL socket closed");
+        setBrokerStatus("disconnected", "Closed");
+      });
+      clientCtrl.on("offline", () => {
+        log("⚠️ MQTT CTRL offline");
+        setBrokerStatus("disconnected", "Offline");
+      });
+      clientCtrl.on("end", () => {
+        log("ℹ️ MQTT CTRL ended");
+        setBrokerStatus("disconnected", "Ended");
+      });
+
+      clientVideo.on("connect", () => {
+        log("✅ Connected to broker (VIDEO)");
+        if (!mediaGateOpen()) {
+          log("⛔ VIDEO: not subscribing yet (train not connected)");
+          return;
+        }
+        clientVideo.subscribe([CAM_TOPIC, CAM_META_TOPIC], { qos: 0 }, (err) => {
+          if (err) log("❌ VIDEO re-subscribe failed:", err.message || err);
+          else log("🔁 VIDEO subscribed (on connect):", [CAM_TOPIC, CAM_META_TOPIC]);
+        });
+      });
+
+
+      clientVideo.on("close", () => log("⚠️ MQTT VIDEO socket closed"));
+
+      clientVideo.on("message", (topic, payload) => {
+  
+  if (!mediaGateOpen()) return; // ✅ gate video/jpeg/meta until trainConnected
+
+// JPEG
+
+  if (topic === CAM_TOPIC) {
+    try {
+      const blob = new Blob([payload], { type: "image/jpeg" });
+      const url = URL.createObjectURL(blob);
+      camImg.src = url;
+
+      if (lastCamUrl) URL.revokeObjectURL(lastCamUrl);
+      lastCamUrl = url;
+
+      lastCamTs = Date.now();
+      camOverlay.style.display = "none";
+    } catch (_) {}
+    return;
+  }
+
+  // META
+  if (topic === CAM_META_TOPIC) {
+    try {
+      const meta = JSON.parse(payload.toString());
+      const now = Date.now();
+
+      const tMetaSend = (meta.t_send_ms != null ? Number(meta.t_send_ms) : null);
+
+      // raw e2e only makes sense if clocks are aligned-ish; still useful in your lab
+      let videoE2eMs = null;
+      if (tMetaSend != null) {
+        const raw = now - tMetaSend;
+        if (raw >= 0 && raw <= 5000) videoE2eMs = raw; // keep sane range
+}
+
+      if (lastMetaRecvMs) {
+        const iat = now - lastMetaRecvMs;
+        const prevIat = window._lastIat ?? iat;
+        const jitter = Math.abs(iat - prevIat);
+
+        videoJitterEwma = ewma(videoJitterEwma, jitter);
+        videoLatencyEwma = ewma(videoLatencyEwma, iat);
+
+        window._lastIat = iat;
+      }
+      lastMetaRecvMs = now;
+
+      if (meta.frame_id != null) {
+        if (lastFrameId != null && Number(meta.frame_id) > Number(lastFrameId) + 1) {
+          videoDrops += (Number(meta.frame_id) - Number(lastFrameId) - 1);
+        }
+        lastFrameId = Number(meta.frame_id);
+      }
+
+      // ===== VIDEO RTT probe (sampled) =====
+if (meta.frame_id != null) {
+  const fid = Number(meta.frame_id);
+
+  // sample every N frames to avoid load
+  if (videoPingEveryN > 0 && (fid % videoPingEveryN === 0)) {
+    const t0 = Date.now();
+    pendingVideoPing.set(fid, t0);
+
+    // fire-and-forget probe
+    clientCtrl?.publish(
+      VIDEO_PING_TOPIC,
+      JSON.stringify({ type: "VIDEO_PING", frame_id: fid, t0 }),
+      { qos: 0 }
+    );
+
+    // prevent map from growing forever (optional safety)
+    if (pendingVideoPing.size > 200) {
+      // delete oldest inserted key
+      const oldestKey = pendingVideoPing.keys().next().value;
+      pendingVideoPing.delete(oldestKey);
+    }
+  }
+}
+
+      const iatShow = window._lastIat != null ? `${Number(window._lastIat).toFixed(0)}ms` : "?";
+
+    qosVideoEl.innerHTML =
+      `<span class="qosKey">Video</span> ` +
+      `frame=${meta.frame_id ?? "?"} ` +
+      `| e2e=${videoE2eMs != null ? videoE2eMs.toFixed(0) + "ms" : "?"}<br>` +
+      `inter-arrival=${iatShow} ` +
+      `| EWMA(inter-arrival)=${videoLatencyEwma != null ? videoLatencyEwma.toFixed(0) + "ms" : "?"} ` +
+      `| EWMA(jitter)=${videoJitterEwma != null ? videoJitterEwma.toFixed(0) + "ms" : "?"} ` +
+      `| drops=${videoDrops}`;
+
+        try {
+        const tMetaSend = (meta?.t_send_ms != null ? Number(meta.t_send_ms) : null);
+const e2eMs =
+  (tMetaSend != null)
+    ? (now - tMetaSend)
+    : null;
+
+// keep only sane values (avoids bad clock / stale meta)
+const e2eClamped =
+  (e2eMs != null && e2eMs >= 0 && e2eMs <= 5000) ? Number(e2eMs) : null;
+
+kpiLog({
+  event: "VIDEO_META_RX",
+  topic,
+  frame_id: (meta?.frame_id != null ? Number(meta.frame_id) : null),
+  t_send_ms: tMetaSend,
+  t_recv_ms: now,
+  e2e_ms: e2eClamped,
+
+  inter_arrival_ms: (window._lastIat != null ? Number(window._lastIat) : null),
+  ewma_inter_arrival_ms: (videoLatencyEwma != null ? Number(videoLatencyEwma) : null),
+  ewma_jitter_ms: (videoJitterEwma != null ? Number(videoJitterEwma) : null),
+  drops: Number(videoDrops)
+});
+} catch (_) {}
+
+
+    } catch (_) {}
+    return;
+  }
+});
+
+function handleQosMessage(topic, payload) {
+  if (topic !== QOS_TOPIC) return false;
+
+  try {
+    const q = JSON.parse(payload.toString());
+
+    if (q && q.type === "AI_RTT") {
+
+      if (q.rtt_ms != null) {
+        window._lastAiRttMs = Number(q.rtt_ms);
+        window._lastAiRttTs = Date.now();
+      }
+
+      kpiLog({
+        event: "AI_RTT",
+        topic,
+        msg_id: (q.msg_id ?? null),
+        rtt_ms: (q.rtt_ms != null ? Number(q.rtt_ms) : null),
+        e2e_est_ms: (q.e2e_est_ms != null ? Number(q.e2e_est_ms) : null),
+        jitter_ms: (q.jitter_ms != null ? Number(q.jitter_ms) : null),
+        t_send_ms: (q.t_send_ms != null ? Number(q.t_send_ms) : null),
+        t_ack_recv_ms: (q.t_ack_recv_ms != null ? Number(q.t_ack_recv_ms) : null),
+        ack_from: (q.ack_from ?? null),
+      });
+    }
+  } catch (_) {}
+
+  return true;
+}
+
+
+
+clientCtrl.on("message", (topic, payload) => {
+
+  if (handleQosMessage(topic, payload)) return;
+
+  let msg = null;
+  try { msg = JSON.parse(payload.toString()); } catch (_) {}
+
+  // ===== KPI: AI ACK received at Remote OBU =====
+  /*if (topic === AI_ACK_TOPIC) {
+    const ack = msg;
+
+    if (ack && ack.msg_id) {
+      const t_ack_recv_ms = Date.now();
+
+      kpiLog({
+        event: "AI_ACK_RX",
+        topic,
+        msg_id: ack.msg_id,
+        t_ack_recv_ms,
+        t_ack_send_ms: ack.t_ack_send_ms ?? null,
+        t_alert_recv_ms: ack.t_alert_recv_ms ?? null,
+        remote_ack_rx_delay_ms:
+          (ack.t_ack_send_ms != null ? (t_ack_recv_ms - ack.t_ack_send_ms) : null)
+      });
+
+      log(`📨 AI ACK received | msg_id=${ack.msg_id}`);
+    }
+    return;
+  }*/
+
+  // ===== VIDEO RTT pong =====
+if (topic === VIDEO_PONG_TOPIC) {
+  
+  if (!mediaGateOpen()) return; // ✅ ignore video RTT pongs until trainConnected
+let pong = null;
+  try { pong = JSON.parse(payload.toString()); } catch (_) {}
+
+  const fid = pong?.frame_id != null ? Number(pong.frame_id) : null;
+  if (fid != null && pendingVideoPing.has(fid)) {
+    const t1 = Date.now();
+    const t0 = pendingVideoPing.get(fid);
+    pendingVideoPing.delete(fid);
+
+    const rtt_ms = t1 - t0;
+    const e2e_est_ms = rtt_ms / 2;
+
+    kpiLog({
+      event: "VIDEO_RTT",
+      frame_id: fid,
+      rtt_ms,
+      e2e_est_ms
+    });
+  }
+  return;
+}
+
+
+  // ===== KPI: TRAIN START/STOP ACK received from OBU =====
+  if (msg && msg.type === "TRAIN_CMD_ACK" && msg.cmd_id) {
+    const t_ack_recv_ms = Date.now();
+    const t0 = pendingTrainCmdTs.get(msg.cmd_id);
+
+    kpiLog({
+      event: "TRAIN_CMD_ACK_RX",
+      cmd: msg.cmd ?? null,
+      cmd_id: msg.cmd_id,
+      t_cmd_send_ms: t0 ?? null,
+      t_ack_recv_ms,
+      e2e_ms: (t0 != null ? (t_ack_recv_ms - t0) : null)
+    });
+
+    pendingTrainCmdTs.delete(msg.cmd_id);
+    log(`✅ TRAIN_CMD_ACK_RX | ${msg.cmd} | ${msg.cmd_id}`);
+    return;
+  }
+
+
+        
+/*if (topic === QOS_TOPIC) {
+  try {
+    const q = JSON.parse(payload.toString());
+
+    // ✅ keep your existing UI cache
+    if (q && q.type === "AI_RTT" && q.rtt_ms != null) {
+      window._lastAiRttMs = Number(q.rtt_ms);
+      window._lastAiRttTs = Date.now();
+    }
+
+    // ✅ NEW: write into KPI log
+    if (q && q.type === "AI_RTT") {
+      kpiLog({
+        event: "AI_RTT",
+        topic,
+        msg_id: (q.msg_id ?? null),
+        rtt_ms: (q.rtt_ms != null ? Number(q.rtt_ms) : null),
+        e2e_est_ms: (q.e2e_est_ms != null ? Number(q.e2e_est_ms) : null),
+        jitter_ms: (q.jitter_ms != null ? Number(q.jitter_ms) : null),
+        t_send_ms: (q.t_send_ms != null ? Number(q.t_send_ms) : null),
+        t_ack_recv_ms: (q.t_ack_recv_ms != null ? Number(q.t_ack_recv_ms) : null),
+        ack_from: (q.ack_from ?? null),
+      });
+    }
+  } catch(_) {}
+  return;
+}*/
+        
+        // Parse JSON for all other topics
+        //let msg = payload.toString();
+        try { msg = JSON.parse(msg); } catch (_) {}
+
+        // ---- Enable Start/Stop when MA received from RBC ----
+        if (
+          currentRbcId &&
+          topic === `rbc/${currentRbcId}/out` &&
+          !maReceived &&
+          isMovementAuthority(msg)
+        ) {
+          maReceived = true;
+          startBtn.disabled = false;
+          stopBtn.disabled = false;
+          log(`✅ MA (NID_MESSAGE=3) received on ${topic} → Start/Stop enabled`);
+        }
+
+        // ---- Train status handling ----
+if (
+  topic === topicStatus(TRAIN_FIXED) &&
+  msg &&
+  typeof msg === "object" &&
+  msg.type === "STATUS"
+) {
+  const svc = (msg.service || "").toString().toLowerCase();
+  const st  = (msg.state || "").toString().toLowerCase();
+
+  // Dataset ACK counter (optional)
+  if (svc === "dataset" && st === "saved") {
+    savedCount += 1;
+    capInfo.textContent = `${savedCount} saved`;
+    log(`✅ Dataset frame saved: ${msg.file || ""}`);
+  }
+
+  // Flexible "OK" state matcher (your launcher uses online/requested, camera uses starting, stack uses started)
+  const okState = (s) =>
+    ["online","pong","started","already_running","starting","running","active","ok","ready","streaming","start_train_requested","start_train_stack_requested","start_stack_requested","start_train_stack_requested"].includes(s);
+
+  // Map services → flags (your sender uses "train_stack")
+  if (svc === "launcher" && okState(st)) trainStatus.launcher = true;
+  if ((svc === "stack" || svc === "train_stack") && okState(st)) trainStatus.stack = true;
+  if (svc === "camera" && okState(st)) trainStatus.camera = true;
+  if ((svc === "hailo" || svc === "yolo" || svc === "ai") && okState(st)) trainStatus.hailo = true;
+
+  log(`STATUS RX: service=${svc} state=${st} | flags=${JSON.stringify(trainStatus)}`);
+
+  // ✅ Make Hailo optional unless you are actually publishing its status
+  const allOk =
+    trainStatus.launcher &&
+    trainStatus.stack &&
+    trainStatus.camera;
+
+  if (allOk && !trainConnected) {
+    trainConnected = true;
+    setTrainUi(`Train: ${TRAIN_FIXED} connected ✅`, true);
+
+    clientAI?.subscribe([QOS_TOPIC], { qos: 1 }, (err) => {
+      if (err) log("❌ QoS subscribe failed (AI):", err.message || err);
+      else log("✅ QoS subscribed (AI):", [QOS_TOPIC]);
+    });
+
+
+    // ✅ Now that train is connected, start media + AI + meta (once)
+    clientVideo?.subscribe([CAM_TOPIC, CAM_META_TOPIC], { qos: 0 }, (err) => {
+      if (err) {
+        log("❌ Camera/meta subscribe failed:", err.message || err);
+      } else {
+        log("✅ Camera/meta subscribed:", [CAM_TOPIC, CAM_META_TOPIC]);
+        capFrameBtn.disabled = false;
+        log("📸 Capture button enabled (trainConnected=true)");
+      }
+    });
+
+    clientAI?.subscribe([LOCAL_AI_ALERT_TOPIC], { qos: 0 }, (err) => {
+      if (err) log("❌ AI subscribe failed:", err.message || err);
+      else log("✅ AI subscribed:", [LOCAL_AI_ALERT_TOPIC]);
+    });
+
+    // If your QoS UI is “frame related”, subscribe only now
+    clientCtrl?.subscribe([QOS_TOPIC], { qos: 0 }, (err) => {
+      if (err) log("❌ QoS subscribe failed:", err.message || err);
+      else log("✅ QoS subscribed:", [QOS_TOPIC]);
+    });
+
+    // Video RTT pong (for VIDEO_RTT KPI)
+    clientCtrl?.subscribe([VIDEO_PONG_TOPIC], { qos: 0 }, (err) => {
+      if (err) log("❌ VIDEO_PONG subscribe failed:", err.message || err);
+      else log("✅ VIDEO_PONG subscribed:", [VIDEO_PONG_TOPIC]);
+    });
+
+    log("✅ Train connected and all required services active");
+  }
+}
+        // Direction hint for ETCS topics
+        let dir = "↔";
+        if (topic.includes("/in")) dir = "OBU → RBC";
+        else if (topic.includes("/out")) dir = "RBC → OBU";
+        else if (topic.includes("handshake")) dir = "HANDSHAKE";
+        else if (topic.includes("/keys")) dir = "KEYS";
+        else if (topic.includes("/ai/alert")) dir = "AI → RBC";
+
+        log(`📩 [${dir}] ${topic} | ${prettyMsgLabel(msg)}`);
+        log(msg);
+
+        
+       
+        // ---- ETCS timing (receiver-side) ----
+        if (topic.includes("/in") || topic.includes("/out")) {
+          const tRecv = Date.now();
+
+          // dir decided above
+          const isOut = topic.includes("/out"); // RBC -> OBU
+          const isIn  = topic.includes("/in");  // OBU -> RBC (you are viewing it on remote OBU)
+
+          let tSend = null;
+          let note = null;
+
+          if (msg && typeof msg === "object") {
+            if (msg.t_send_ms != null) {
+  tSend = Number(msg.t_send_ms);
+} else {
+  note = "missing t_send_ms";
+}
+
+
+          }
+
+          const netMs = (tSend != null) ? (tRecv - tSend) : null;
+
+          qosEtcsEl.innerHTML =
+            `<span class="qosKey">ETCS</span> ` +
+            `dir=${dir} ` +
+            `| t_recv=${tRecv} ` +
+            `| net=${netMs != null ? netMs.toFixed(0) + "ms" : (note ?? "NA")}`;
+
+            try {
+  kpiLog({
+    event: "ETCS_OBSERVED",
+    topic,
+    dir,
+    nid_message: (msg && typeof msg === "object") ? (msg.NID_MESSAGE ?? null) : null,
+    sequence:   (msg && typeof msg === "object") ? (msg.SEQUENCE ?? null) : null,
+    t_recv_ms: tRecv,
+    t_send_ms: (tSend != null ? Number(tSend) : null),
+    net_ms:    (netMs != null ? Number(netMs) : null)
+  });
+} catch (_) {}
+
+        }
+
+
+
+      });
+
+
+      clientAI.on("message", (topic, payload) => {
+        	
+
+        // ===== KPI: AI ACK received at Remote OBU (on AI client) =====
+if (topic === AI_ACK_TOPIC) {
+  let ack = null;
+  try { ack = JSON.parse(payload.toString()); } catch (_) {}
+
+  if (ack && ack.msg_id) {
+    const t_ack_recv_ms = Date.now();
+
+    kpiLog({
+      event: "AI_ACK_RX",
+      topic,
+      msg_id: ack.msg_id,
+      t_ack_recv_ms,
+      t_ack_send_ms: ack.t_ack_send_ms ?? null,
+      t_alert_recv_ms: ack.t_alert_recv_ms ?? null,
+      remote_ack_rx_delay_ms:
+        (ack.t_ack_send_ms != null ? (t_ack_recv_ms - ack.t_ack_send_ms) : null)
+    });
+
+    log(`📨 AI ACK received | msg_id=${ack.msg_id}`);
+  }
+  return;
+}
+
+        if (handleQosMessage(topic, payload)) return;
+
+  if (!mediaGateOpen()) return; // ✅ gate AI until trainConnected
+
+// ---- Local AI alert (blink red) ----
+if (topic === LOCAL_AI_ALERT_TOPIC) {
+  const raw = payload.toString();
+  let obj = null;
+  try { obj = JSON.parse(raw); } catch (_) {}
+
+  // If it's not valid JSON, ignore (prevents random flashing)
+  if (!obj || typeof obj !== "object") {
+    log(`ℹ️ Non-JSON on ${LOCAL_AI_ALERT_TOPIC} ignored`);
+    return;
+  }
+
+// ✅ Browser-local receive timestamp (DO NOT mutate the incoming payload object)
+const tRecv = Date.now();
+const tCap  = obj.t_capture_ms != null ? Number(obj.t_capture_ms) : null;
+const tInfer= obj.t_infer_done_ms != null ? Number(obj.t_infer_done_ms) : null;
+const tSend = obj.t_send_ms != null ? Number(obj.t_send_ms) : null;
+
+// Calculate inference time (Pi clock only - safe)
+const inferMs = (tCap != null && tInfer != null) ? (tInfer - tCap) : null;
+
+// Instead of direct subtraction, check for reasonable values
+let netMs = null;
+let e2eMs = null;
+
+if (tSend != null) {
+  const rawNet = tRecv - tSend;
+  // Only accept reasonable network delays (0-5000ms)
+  if (rawNet >= 0 && rawNet <= 5000) {
+    netMs = rawNet;
+  }
+}
+
+if (tCap != null) {
+  const rawE2e = tRecv - tCap;
+  // Only accept reasonable end-to-end delays (0-10000ms)
+  if (rawE2e >= 0 && rawE2e <= 10000) {
+    e2eMs = rawE2e;
+  }
+}
+
+// Use RTT-based estimates if available
+const rttMs = (window._lastAiRttMs != null) ? Number(window._lastAiRttMs) : null;
+const netEstMs = (rttMs != null) ? (rttMs / 2.0) : null;
+const e2eEstMs = (inferMs != null && netEstMs != null) ? (inferMs + netEstMs) : null;
+
+// Update EWMA calculations
+if (inferMs != null) aiInferEwma = ewma(aiInferEwma, inferMs);
+if (netMs != null) aiNetworkEwma = ewma(aiNetworkEwma, netMs);
+if (e2eMs != null) aiLatencyEwma = ewma(aiLatencyEwma, e2eMs);
+
+// Display with fallbacks
+qosAiEl.innerHTML =
+  `<span class="qosKey">AI</span> ` +
+  `id=${obj.msg_id ?? "?"} ` +
+  `| infer=${inferMs != null ? inferMs.toFixed(0)+"ms" : "?"} ` +
+ `| net≈${netEstMs != null ? netEstMs.toFixed(0)+"ms" : "?"} ` +   // ✅ always based on RTT/2
+`| e2e≈${e2eEstMs != null ? e2eEstMs.toFixed(0)+"ms" : "?"}<br>` +
+  `RTT=${rttMs != null ? rttMs.toFixed(0)+"ms" : "?"} ` +
+  `| EWMA(infer)=${aiInferEwma != null ? aiInferEwma.toFixed(0)+"ms" : "?"}`;
+
+
+  try {
+  kpiLog({
+    event: "AI_ALERT_RX",
+    topic,
+    msg_id: obj?.msg_id ?? null,
+    type: obj?.type ?? null,
+    label: obj?.label ?? null,
+    conf:  (obj?.conf != null ? Number(obj.conf) : null),
+
+    // Remote OBU clock
+    t_recv_ms: tRecv,
+
+    // Producer timestamps (Pi/OBU clock)
+    t_capture_ms: (tCap != null ? Number(tCap) : null),
+    t_infer_done_ms: (tInfer != null ? Number(tInfer) : null),
+    t_send_ms: (tSend != null ? Number(tSend) : null),
+
+    // Derived
+    infer_ms: (inferMs != null ? Number(inferMs) : null),
+    net_ms:      (netMs != null ? Number(netMs) : null),          // raw (only if clocks happen to align)
+    net_ms_est:  (netEstMs != null ? Number(netEstMs) : null),    // ✅ RTT/2 estimate (always usable)
+
+    e2e_ms: (e2eMs != null ? Number(e2eMs) : (e2eEstMs != null ? Number(e2eEstMs) : null)),
+
+    // RTT-based estimate (single-clock safe)
+    rtt_ms: (window._lastAiRttMs != null ? Number(window._lastAiRttMs) : null)
+  });
+} catch (_) {}
+
+
+// --- send ACK back so Pi can compute RTT (single-clock) ---
+if (clientAI && clientAI.connected && obj.msg_id) {
+  // Remote OBU timestamps
+  const t_ack_send_ms = Date.now();      // when we send ACK
+  const t_alert_recv_ms = tRecv;         // already computed earlier in this handler
+
+  const ack = {
+    type: "AI_ACK",
+    msg_id: obj.msg_id,
+    receiver: "remote_obu",
+
+    // keep old field (backward compatible)
+    t_ack_ms: t_ack_send_ms,
+
+    // new explicit fields (for KPI)
+    t_ack_send_ms,
+    t_alert_recv_ms
+  };
+
+  //clientCtrl.publish(AI_ACK_TOPIC, JSON.stringify(ack), { qos: 1, retain: false });
+  clientAI.publish(AI_ACK_TOPIC, JSON.stringify(ack), { qos: 1, retain: false });
+
+
+  // Remote-side ACK KPI logging
+  try {
+    kpiLog({
+      event: "AI_ACK_TX",
+      topic: AI_ACK_TOPIC,
+      msg_id: obj.msg_id,
+
+      // Remote clock
+      t_alert_recv_ms,
+      t_ack_send_ms,
+
+      // Derived at Remote (single-clock safe)
+      remote_ack_processing_ms: (t_ack_send_ms - t_alert_recv_ms),
+
+      // Producer timestamps (copied from alert if present)
+      t_capture_ms: (tCap != null ? Number(tCap) : null),
+      t_infer_done_ms: (tInfer != null ? Number(tInfer) : null),
+      t_send_ms: (tSend != null ? Number(tSend) : null)
+    });
+  } catch (_) {}
+}
+
+
+
+  if (obj.t_capture_ms && obj.t_infer_done_ms) {
+    const inferMs = Number(obj.t_infer_done_ms) - Number(obj.t_capture_ms);
+    log(`🧠 AI infer time: ${inferMs} ms | id=${obj.msg_id || "?"}`);
+  }
+
+  // Only blink for real alerts
+  // (If later you add "TRACK_ANOMALY", keep it here too.)
+  if (obj.type !== "AI_ALERT" && obj.type !== "TRACK_ANOMALY") {
+    log(`ℹ️ ${LOCAL_AI_ALERT_TOPIC} msg ignored (type=${obj.type})`);
+    return;
+  }
+
+  const label = obj.label ?? obj.class ?? obj.name ?? "Obstacle";
+
+  // Nice formatting for confidence / ROI overlap / distance (if present)
+  const parts = [];
+  parts.push(obj.type === "TRACK_ANOMALY" ? `TRACK ISSUE: ${label}` : label);
+
+  if (obj.conf !== undefined) parts.push(`conf=${Number(obj.conf).toFixed(2)}`);
+  if (obj.roi_overlap !== undefined) parts.push(`roi=${Number(obj.roi_overlap).toFixed(2)}`);
+
+  // Distance (your future Pi code will publish one of these)
+  if (obj.distance_cm !== undefined) parts.push(`dist≈${Math.round(Number(obj.distance_cm))} cm`);
+  else if (obj.distance_m !== undefined) parts.push(`dist≈${Number(obj.distance_m).toFixed(2)} m`);
+  else if (obj.distance_label) parts.push(`dist≈${obj.distance_label}`);
+
+  showAlert(parts.join(" | "));
+  log(`🚨 [ALERT] ${LOCAL_AI_ALERT_TOPIC}`);
+  log(obj);
+  return;
+}
+
+
+      });
+      // If camera never arrives, show overlay
+      setInterval(() => {
+        if (!clientVideo) return;
+        const age = Date.now() - lastCamTs;
+        if (age > 3000) {
+          camOverlay.textContent = "No camera frames yet";
+          camOverlay.style.display = "inline-block";
+        }
+      }, 1000);
+    };
+
+    /***************
+     * BUTTONS
+     ***************/
+
+     downloadKpiBtn.addEventListener("click", () => {
+  kpi.download();
+  log("⬇️ KPI log download triggered");
+});
+
+    // RBC Connect button
+    connectBtn.addEventListener("click", () => {
+      const rbcId = document.getElementById("rbcId").value.trim();
+      if (!rbcId) return alert("Enter RBC ID");
+      if (!clientCtrl) return alert("Broker not connected yet");
+
+      currentRbcId = rbcId;
+      maReceived = false;
+
+      startBtn.disabled = true;
+      stopBtn.disabled = true;
+
+      clientCtrl.publish(
+        topicCmd(TRAIN_FIXED),
+        JSON.stringify({ cmd: "START_ETCS_STACK", trainNo: TRAIN_FIXED, rbcId, ts: Date.now() }),
+        { qos: 1 }
+      );
+
+      subscribeToRbc(rbcId);
+      log(`🛰️ RBC connect requested: ${rbcId} (waiting for MA...)`);
+    });
+
+    // Train connect button
+    trainConnectBtn.addEventListener("click", () => {
+      if (!clientCtrl) return alert("Broker not connected");
+
+      const typed = document.getElementById("trainNo").value.trim();
+      if (!typed) return alert("Enter Train Number");
+
+      if (typed !== TRAIN_FIXED) {
+        setTrainUi(`Train mismatch (Pi is ${TRAIN_FIXED}) ❌`);
+        return;
+      }
+
+      trainConnected = false;
+      trainStatus = { launcher:false, stack:false, camera:false, hailo:false };
+      setTrainUi(`Train: ${TRAIN_FIXED} connecting...`);
+
+      // 1) subscribe status
+      clientCtrl.subscribe(topicStatus(TRAIN_FIXED), { qos: 1 }, (err) => {
+        if (err) {
+          log("❌ Train status subscribe failed:", err.message || err);
+          setTrainUi("Train: subscribe failed ❌");
+          return;
+        }
+
+
+        subscribedTopics = Array.from(new Set([...subscribedTopics, topicStatus(TRAIN_FIXED)]));
+        subText.textContent = `Subscribed: ${subscribedTopics.length} topics`;
+        log("✅ Subscribed to train status");
+
+
+
+// 2) IMPORTANT: Do NOT subscribe to camera/meta/AI/QoS here.
+//    Subscriptions are started only when trainConnected=true (allOk) inside STATUS handler.
+
+
+
+
+        // 3) request stack start
+        const cmd = { cmd: "START_TRAIN_STACK", trainNo: TRAIN_FIXED, ts: Date.now() };
+        clientCtrl.publish(topicCmd(TRAIN_FIXED), JSON.stringify(cmd), { qos: 1 }, (err2) => {
+          if (err2) {
+            log("❌ START_TRAIN_STACK failed:", err2.message || err2);
+            setTrainUi("Train start failed ❌");
+          } else {
+            log("🟩 START_TRAIN_STACK sent");
+          }
+        });
+      });
+    });
+
+    //start and stop button
+startBtn.addEventListener("click", () => {
+  if (!clientCtrl) return;
+
+  const t_send_ms = Date.now();
+  const cmd_id = `START_${t_send_ms}`;
+
+  // store for KPI
+  pendingTrainCmdTs.set(cmd_id, t_send_ms);
+
+  // KPI log (unchanged semantics)
+  kpi.log({
+    event: "TRAIN_CMD_TX",
+    cmd: "START",
+    topic: "obu/train",
+    payload: "1",
+    cmd_id,
+    t_send_ms
+  });
+
+  // (1) ORIGINAL behavior — ESP32 still works
+  clientCtrl.publish("obu/train", "1", { qos: 1 }, (err) => {
+    if (!err) log("🚆 Start Train → published '1' to obu/train (ESP32)");
+    else log("❌ Start failed:", err.message || err);
+  });
+
+  // (2) SHADOW publish for OBU observation (new)
+  clientCtrl.publish(
+    TRAIN_CMD_META_TOPIC,
+    JSON.stringify({
+      type: "TRAIN_CMD_META",
+      cmd: "START",
+      cmd_id,
+      t_cmd_send_ms: t_send_ms
+    }),
+    { qos: 1 }
+  );
+});
+
+
+stopBtn.addEventListener("click", () => {
+  if (!clientCtrl) return;
+
+  const t_send_ms = Date.now();
+  const cmd_id = `STOP_${t_send_ms}`;
+
+  pendingTrainCmdTs.set(cmd_id, t_send_ms);
+
+  kpi.log({
+    event: "TRAIN_CMD_TX",
+    cmd: "STOP",
+    topic: "obu/train",
+    payload: "0",
+    cmd_id,
+    t_send_ms
+  });
+
+  // (1) ORIGINAL behavior — ESP32 unchanged
+  clientCtrl.publish("obu/train", "0", { qos: 1 }, (err) => {
+    if (!err) log("🛑 Stop Train → published '0' to obu/train (ESP32)");
+    else log("❌ Stop failedCtrl:", err.message || err);
+  });
+
+  // (2) SHADOW publish for OBU observation
+  clientCtrl.publish(
+    TRAIN_CMD_META_TOPIC,
+    JSON.stringify({
+      type: "TRAIN_CMD_META",
+      cmd: "STOP",
+      cmd_id,
+      t_cmd_send_ms: t_send_ms
+    }),
+    { qos: 1 }
+  );
+});
+
+
+
+    // ✅ Manual capture trigger (ONLY runs when you click)
+    capFrameBtn.addEventListener("click", () => {
+      if (!clientCtrl) return;
+
+
+      clientCtrl.publish(
+		"obu/TRAIN01/cmd",
+		JSON.stringify({ cmd: "CAPTURE_30S" }),
+		{ qos: 1}
+      );
+	  
+	  log(" Dataset capture started (30s @ 7fps)");
+    });
+
+    /***************
+     * AUTO CONNECT ON LOAD
+     ***************/
+    window.addEventListener("load", () => {
+      connectBroker();
+    });
+  </script>
+</body>
+</html>
