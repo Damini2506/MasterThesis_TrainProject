@@ -24,3 +24,9 @@ logs/
 # OS junk
 .DS_Store
 Thumbs.db
+
+# local tc scripts
+tc_netem_with_qos.sh
+
+# local tc scripts
+tc_netem_only.sh

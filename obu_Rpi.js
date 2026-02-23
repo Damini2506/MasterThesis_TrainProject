@@ -24,6 +24,8 @@ const OBU_ID = "OBU1234";
 // If your Remote OBU UI uses fixed train number:
 const TRAIN_FIXED = "TRAIN01";
 
+const VIDEO_PING_TOPIC = "obu/video/ping";
+const VIDEO_PONG_TOPIC = "obu/video/pong";
 const TRAIN_CMD_META_TOPIC = "obu/train/meta"; // shadow cmd from Remote OBU
 
 // ===== topics for auto stop =====
@@ -267,6 +269,24 @@ const processMessage = (topic, payloadBuf) => {
       );
 
       logger.log(`? TRAIN_CMD_META RX ? ACK sent | ${msg.cmd} | ${msg.cmd_id}`);
+      return;
+    }
+    
+    // ===== VIDEO RTT responder (Remote sends ping, OBU replies pong) =====
+    if (topic === VIDEO_PING_TOPIC) {
+      let ping = null;
+      try { ping = JSON.parse(payload.toString()); } catch (_) {}
+
+    publish(
+      VIDEO_PONG_TOPIC,
+      {
+        type: "VIDEO_PONG",
+        frame_id: ping?.frame_id ?? null,
+        t0: ping?.t0 ?? null,             // echo remote timestamp (remote uses it)
+        t_obu_pong_send_ms: Date.now()    // optional debug
+      },
+      { qos: 0 }
+    );
       return;
     }
 
@@ -548,6 +568,7 @@ mqttClient.on("connect", () => {
   // already covers obu/ai/alert too (plus any other pi topics)
   subscribe(["obu/status", "obu/ai/#", "obu/safety/#"], { qos: 1 });
   subscribe(TRAIN_CMD_META_TOPIC, { qos: 1 });
+  subscribe(VIDEO_PING_TOPIC, { qos: 0 });
 
   startHandshake(); // auto
 });
