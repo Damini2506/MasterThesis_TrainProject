@@ -66,9 +66,9 @@ QOS_PUB_CLIENT = None
 # =========================
 # Camera publish settings
 # =========================
-FPS = 10
+FPS = 15    #INCREASED FOR EXPERIMENTATION
 PUB_W, PUB_H = 640, 360
-JPEG_QUALITY = 35
+JPEG_QUALITY = 55 #INCREASED FOR EXPERIMENTATION
 
 
 # =========================
